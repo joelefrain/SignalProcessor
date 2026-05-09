@@ -35,13 +35,32 @@ Recomendacion automatica restringiendo las familias de filtro evaluadas. Por def
 .\.venv\Scripts\python.exe -m signalprocessor.cli recommend examples/data/benchmark/uncorrected_motion/CCSP.HNN.._u.smc --filter-types bessel,cheby2 --top 10
 ```
 
-Desde Python:
+Desde Python, camino automatico:
 
 ```python
 from signalprocessor.recommendation import recommend_correction_method
 
 recommendation = recommend_correction_method(record, filter_types="bessel, cheby2")
 # Use filter_types=None, "all" o "todas" para evaluar todas las familias disponibles.
+result_auto = recommendation.best.result
+```
+
+Desde Python, camino manual con parametros escritos por el usuario:
+
+```python
+from signalprocessor.processing import CorrectionConfig, correct_record
+
+manual_config = CorrectionConfig(
+    filter_type="butterworth",
+    highpass_hz=0.02,
+    lowpass_hz=25.0,
+    filter_order=4,
+    baseline_order=1,
+    post_filter_baseline_order=1,
+    post_filter_constrain_final_velocity=True,
+    post_filter_constrain_final_displacement=True,
+)
+result_manual = correct_record(record, manual_config)
 ```
 
 Espectro de respuesta:
@@ -64,7 +83,7 @@ Ajuste espectral iterativo:
 
 ## Notebooks
 
-- `notebooks/01_correccion_senales.ipynb`: correccion SMC y comparacion contra USGS.
+- `notebooks/01_correccion_senales.ipynb`: correccion SMC por dos caminos, recomendacion automatica y parametros manuales, con comparacion contra USGS. Incluye el caso manual Butterworth 0.02-25 Hz.
 - `notebooks/02_escalamiento_lineal.ipynb`: factores lineales para todos los CSV de ejemplo.
 - `notebooks/03_ajuste_espectral_wavelet.ipynb`: ajuste espectral iterativo y comparacion contra objetivo.
 - `notebooks/04_benchmarks.ipynb`: tablas de benchmark USGS y SeismoMatch.
