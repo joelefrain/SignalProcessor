@@ -1,0 +1,14 @@
+[io]
+input = "examples/data/motion/LIMAEW.csv"
+unit = "g"
+name = "LIMAEW"
+output_dir = "examples/ouput/scale"
+output_stem = "LIMAEW"
+output_unit = "g"
+
+[scale]
+target_spectrum = "examples/data/response_spectrum/EPU_475.csv"
+method = "log_least_squares"
+period_range = [0.10, 2.00]
+factor_bounds = [0.20, 5.00]
+damping = 0.05

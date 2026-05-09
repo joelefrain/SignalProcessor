@@ -1,0 +1,2 @@
+[console_scripts]
+sismosignal = sismosignal.cli:main

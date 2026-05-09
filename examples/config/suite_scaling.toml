@@ -1,0 +1,33 @@
+[suite]
+target_spectrum = "examples/data/response_spectrum/EPU_475.csv"
+output_dir = "examples/ouput/suite"
+unit = "g"
+output_unit = "g"
+method = "log_least_squares"
+period_range = [0.10, 2.00]
+factor_bounds = [0.20, 5.00]
+damping = 0.05
+
+[[suite.records]]
+input = "examples/data/motion/LIMAEW.csv"
+name = "LIMAEW"
+
+[[suite.records]]
+input = "examples/data/motion/LIMANS.csv"
+name = "LIMANS"
+
+[[suite.records]]
+input = "examples/data/motion/ATICOEW.csv"
+name = "ATICOEW"
+
+[[suite.records]]
+input = "examples/data/motion/ATICONS.csv"
+name = "ATICONS"
+
+[[suite.records]]
+input = "examples/data/motion/TARAPACAEW.csv"
+name = "TARAPACAEW"
+
+[[suite.records]]
+input = "examples/data/motion/TARAPACANS.csv"
+name = "TARAPACANS"

@@ -1,0 +1,26 @@
+[io]
+input = "examples/data/motion/LIMAEW.csv"
+unit = "g"
+name = "LIMAEW"
+output_dir = "examples/ouput/process"
+output_stem = "LIMAEW"
+output_unit = "g"
+
+[baseline]
+method = "polynomial"
+order = 1
+enforce_zero_end = true
+
+[filter]
+highpass_hz = 0.08
+lowpass_hz = 18.0
+order = 4
+zero_phase = true
+taper_fraction = 0.02
+pad_seconds = 5.0
+
+[spectrum]
+min_period_s = 0.02
+max_period_s = 5.0
+points = 120
+damping = 0.05

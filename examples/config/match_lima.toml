@@ -1,0 +1,15 @@
+[io]
+input = "examples/data/motion/LIMAEW.csv"
+unit = "g"
+name = "LIMAEW"
+output_dir = "examples/ouput/match"
+output_stem = "LIMAEW"
+output_unit = "g"
+
+[match]
+target_spectrum = "examples/data/response_spectrum/EPU_475.csv"
+iterations = 3
+max_factor_per_iteration = 1.6
+smoothing_width = 7
+highpass_hz = 0.08
+damping = 0.05
