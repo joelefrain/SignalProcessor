@@ -10,7 +10,7 @@ from .motion import Motion
 
 
 @dataclass(slots=True)
-class BaselineResult:
+class Baselineouput:
     motion: Motion
     baseline: NDArray[np.float64]
     coefficients: NDArray[np.float64]
@@ -118,7 +118,7 @@ def correct_baseline(
     enforce_zero_end: bool = False,
     v_final: float = 0.0,
     u_final: float = 0.0,
-) -> BaselineResult:
+) -> Baselineouput:
     method_norm = method.strip().lower()
     info: dict[str, float | str | int] = {"order": int(order)}
 
@@ -171,4 +171,4 @@ def correct_baseline(
             "baseline_mean_mps2": float(np.mean(baseline)),
         }
     )
-    return BaselineResult(corrected, baseline, coeffs, method_norm, info)
+    return Baselineouput(corrected, baseline, coeffs, method_norm, info)

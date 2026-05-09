@@ -24,7 +24,7 @@ except Exception:  # pragma: no cover
     prange = range  # type: ignore
 
 
-@njit(cache=True, parallel=True, fastmath=True)
+@njit(cache=False, parallel=True, fastmath=True)
 def _newmark_spectrum_numba(
     ag: NDArray[np.float64],
     dt: float,

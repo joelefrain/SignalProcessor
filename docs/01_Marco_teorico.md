@@ -524,7 +524,7 @@ Criterios para elegir:
 2. **Ventanas quietas:** el polinomio debe ajustarse preferentemente a tramos donde se conoce o se espera ausencia de movimiento.
 3. **No borrar física:** si el registro contiene pulso de velocidad o desplazamiento permanente, no imponer cero desplazamiento final sin evidencia.
 4. **Comparar espectros:** el polinomio no debe alterar significativamente el espectro dentro del rango de periodos de interés.
-5. **Repetibilidad:** si pequeñas variaciones en la ventana producen resultados muy distintos, el registro no es confiable para largo periodo.
+5. **Repetibilidad:** si pequeñas variaciones en la ventana producen ouputados muy distintos, el registro no es confiable para largo periodo.
 
 ---
 
@@ -1192,7 +1192,7 @@ Un procesamiento puede considerarse aceptable si:
 3. Velocidad y desplazamiento son coherentes.
 4. El espectro no fue alterado artificialmente en el rango de diseño.
 5. Los filtros y baseline están documentados.
-6. El resultado es estable frente a perturbaciones razonables.
+6. El ouputado es estable frente a perturbaciones razonables.
 7. La corrección no elimina rasgos físicos relevantes.
 
 ---
@@ -2068,7 +2068,7 @@ El filtrado high-pass y el ajuste espectral pueden destruir estos rasgos. Para e
 - Fase:
 - Software/código:
 
-### 27.3. Parámetros resultantes
+### 27.3. Parámetros ouputantes
 
 - PGA:
 - PGV:
@@ -2210,7 +2210,7 @@ $$
 5. **Escalar no equivale a seleccionar.** Primero se elige un registro físicamente compatible; luego se escala.
 6. **Spectrum matching requiere control adicional.** Un espectro perfecto puede esconder una señal físicamente degradada.
 7. **La suite importa más que un registro aislado.** Para diseño o evaluación, controlar media, dispersión y diversidad.
-8. **Documentar todo.** Sin parámetros de procesamiento, el resultado no es auditable.
+8. **Documentar todo.** Sin parámetros de procesamiento, el ouputado no es auditable.
 
 ---
 

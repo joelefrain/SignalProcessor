@@ -13,7 +13,7 @@ from .spectra import response_spectrum
 
 
 @dataclass(slots=True)
-class ScaleResult:
+class Scaleouput:
     motion: Motion
     factor: float
     periods: NDArray[np.float64]
@@ -98,7 +98,7 @@ def scale_motion_to_target(
     period_range: tuple[float, float] | None = None,
     single_period: float | None = None,
     factor_bounds: tuple[float, float] | None = (0.1, 10.0),
-) -> ScaleResult:
+) -> Scaleouput:
     spectrum = response_spectrum(motion, target_periods, damping=damping)
     rec_sa = spectrum["sa_g"]
     factor = scale_factor(
@@ -112,7 +112,7 @@ def scale_motion_to_target(
     if factor_bounds is not None:
         factor = float(np.clip(factor, factor_bounds[0], factor_bounds[1]))
     scaled = motion.scaled(factor, name=f"{motion.name}_scaled")
-    return ScaleResult(
+    return Scaleouput(
         motion=scaled,
         factor=factor,
         periods=np.asarray(target_periods, dtype=np.float64),
@@ -132,11 +132,11 @@ def scale_suite_to_target(
     method: str = "log_least_squares",
     period_range: tuple[float, float] | None = None,
     factor_bounds: tuple[float, float] | None = (0.2, 5.0),
-) -> tuple[list[ScaleResult], NDArray[np.float64]]:
-    ouput: list[ScaleResult] = []
+) -> tuple[list[Scaleouput], NDArray[np.float64]]:
+    output: list[Scaleouput] = []
     scaled_spectra = []
     for motion in motions:
-        result = scale_motion_to_target(
+        ouput = scale_motion_to_target(
             motion,
             target_periods,
             target_sa_g,
@@ -145,11 +145,11 @@ def scale_suite_to_target(
             period_range=period_range,
             factor_bounds=factor_bounds,
         )
-        ouput.append(result)
-        scaled_spectra.append(np.maximum(result.scaled_sa_g, np.finfo(float).tiny))
+        output.append(ouput)
+        scaled_spectra.append(np.maximum(ouput.scaled_sa_g, np.finfo(float).tiny))
     matrix = np.vstack(scaled_spectra)
     suite_geo_mean = np.exp(np.mean(np.log(matrix), axis=0))
-    return ouput, suite_geo_mean
+    return output, suite_geo_mean
 
 
 def _moving_average(values: NDArray[np.float64], width: int) -> NDArray[np.float64]:
@@ -173,7 +173,7 @@ def frequency_domain_spectral_match(
     smoothing_width: int = 7,
     highpass_hz: float | None = 0.05,
     lowpass_hz: float | None = None,
-) -> ScaleResult:
+) -> Scaleouput:
     """Fast approximate spectral matching by shaping Fourier amplitudes.
 
     This is useful for exploration and preconditioning. Response-spectrum
@@ -227,7 +227,7 @@ def frequency_domain_spectral_match(
     total_factor *= float(rms_ratio)
     current = current.scaled(total_factor, name=f"{motion.name}_matched")
     final_sa = final_spec["sa_g"] * total_factor
-    return ScaleResult(
+    return Scaleouput(
         motion=current,
         factor=total_factor,
         periods=target_periods,

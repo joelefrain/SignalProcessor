@@ -10,13 +10,13 @@ python -m pip install -e .
 
 ## Casos de uso incluidos
 
-```powershell
-python examples/01_correccion_filtrado.py
-python examples/02_parametros_espectro.py
-python examples/03_escalamiento_lineal.py
-python examples/04_escalamiento_suite.py
-python examples/05_ajuste_espectral_rapido.py
-```
+Los casos de uso viven como notebooks en `notebooks/`:
+
+- `01_correccion_filtrado.ipynb`
+- `02_parametros_espectro.ipynb`
+- `03_escalamiento_lineal.ipynb`
+- `04_escalamiento_suite.ipynb`
+- `05_ajuste_espectral_rapido.ipynb`
 
 Tambien se puede usar la CLI:
 
@@ -29,10 +29,10 @@ sismosignal suite --config examples/config/suite_scaling.toml
 Si Windows no tiene la carpeta de scripts de Python en el `PATH`, usa la forma equivalente:
 
 ```powershell
-python -m sismosignal.cli process --config examples/config/process_lima.toml
+python -m signalprocessor.cli process --config examples/config/process_lima.toml
 ```
 
-Los resultados se escriben en `examples/ouput/`: CSV procesados, espectros, metricas JSON y figuras PNG.
+Los ouputados se escriben en `examples/ouputs/`: CSV procesados, espectros, metricas JSON y figuras PNG.
 
 ## Unidades
 

@@ -2,7 +2,7 @@
 input = "examples/data/motion/LIMAEW.csv"
 unit = "g"
 name = "LIMAEW"
-output_dir = "examples/ouput/match"
+output_dir = "examples/ouputs/match"
 output_stem = "LIMAEW"
 output_unit = "g"
 

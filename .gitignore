@@ -66,6 +66,7 @@ __pycache__/
 *.pyo
 *.pyd
 *.sqlite3
+*.egg-info/
 venv/
 env/
 .venv/

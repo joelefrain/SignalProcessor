@@ -26,16 +26,16 @@ def _process(args: argparse.Namespace) -> None:
         unit=io_cfg.get("unit", "g"),
         name=io_cfg.get("name"),
     )
-    result = process_motion(motion, ProcessConfig.from_dict(data))
-    out_dir = Path(io_cfg.get("output_dir", "examples/ouput/process"))
+    ouput = process_motion(motion, ProcessConfig.from_dict(data))
+    out_dir = Path(io_cfg.get("output_dir", "examples/ouputs/process"))
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = io_cfg.get("output_stem", motion.name)
-    write_motion_csv(out_dir / f"{stem}_processed.csv", result.filtered.motion, unit=io_cfg.get("output_unit", "g"))
-    write_json(out_dir / f"{stem}_metrics.json", result.metrics | {"baseline": result.baseline.info, "filter": result.filtered.info})
-    write_spectrum_csv(out_dir / f"{stem}_spectrum.csv", result.spectrum["period_s"], result.spectrum["sa_g"])
-    save_motion_plot(out_dir / f"{stem}_motion.png", result.filtered.motion, result.velocity_m_s, result.displacement_m, title=stem)
-    save_spectrum_plot(out_dir / f"{stem}_spectrum.png", result.spectrum["period_s"], {"processed": result.spectrum["sa_g"]}, title=stem)
-    print(f"Wrote processed ouput to {out_dir}")
+    write_motion_csv(out_dir / f"{stem}_processed.csv", ouput.filtered.motion, unit=io_cfg.get("output_unit", "g"))
+    write_json(out_dir / f"{stem}_metrics.json", ouput.metrics | {"baseline": ouput.baseline.info, "filter": ouput.filtered.info})
+    write_spectrum_csv(out_dir / f"{stem}_spectrum.csv", ouput.spectrum["period_s"], ouput.spectrum["sa_g"])
+    save_motion_plot(out_dir / f"{stem}_motion.png", ouput.filtered.motion, ouput.velocity_m_s, ouput.displacement_m, title=stem)
+    save_spectrum_plot(out_dir / f"{stem}_spectrum.png", ouput.spectrum["period_s"], {"processed": ouput.spectrum["sa_g"]}, title=stem)
+    print(f"Wrote processed output to {out_dir}")
 
 
 def _spectrum(args: argparse.Namespace) -> None:
@@ -52,7 +52,7 @@ def _scale(args: argparse.Namespace) -> None:
     scale_cfg = data.get("scale", {})
     motion = read_motion_csv(io_cfg["input"], unit=io_cfg.get("unit", "g"), name=io_cfg.get("name"))
     target_periods, target_sa = read_spectrum_csv(scale_cfg["target_spectrum"])
-    result = scale_motion_to_target(
+    ouput = scale_motion_to_target(
         motion,
         target_periods,
         target_sa,
@@ -62,19 +62,19 @@ def _scale(args: argparse.Namespace) -> None:
         single_period=scale_cfg.get("single_period_s"),
         factor_bounds=tuple(scale_cfg.get("factor_bounds", [0.1, 10.0])),
     )
-    out_dir = Path(io_cfg.get("output_dir", "examples/ouput/scale"))
+    out_dir = Path(io_cfg.get("output_dir", "examples/ouputs/scale"))
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = io_cfg.get("output_stem", motion.name)
-    write_motion_csv(out_dir / f"{stem}_scaled.csv", result.motion, unit=io_cfg.get("output_unit", "g"))
-    write_spectrum_csv(out_dir / f"{stem}_scaled_spectrum.csv", result.periods, result.scaled_sa_g)
-    write_json(out_dir / f"{stem}_scale.json", {"factor": result.factor, "method": result.method, "metrics": motion_metrics(result.motion)})
+    write_motion_csv(out_dir / f"{stem}_scaled.csv", ouput.motion, unit=io_cfg.get("output_unit", "g"))
+    write_spectrum_csv(out_dir / f"{stem}_scaled_spectrum.csv", ouput.periods, ouput.scaled_sa_g)
+    write_json(out_dir / f"{stem}_scale.json", {"factor": ouput.factor, "method": ouput.method, "metrics": motion_metrics(ouput.motion)})
     save_spectrum_plot(
         out_dir / f"{stem}_scale.png",
-        result.periods,
-        {"record": result.record_sa_g, "scaled": result.scaled_sa_g, "target": result.target_sa_g},
-        title=f"{stem} factor={result.factor:.3g}",
+        ouput.periods,
+        {"record": ouput.record_sa_g, "scaled": ouput.scaled_sa_g, "target": ouput.target_sa_g},
+        title=f"{stem} factor={ouput.factor:.3g}",
     )
-    print(f"Wrote scaled ouput to {out_dir}; factor={result.factor:.6g}")
+    print(f"Wrote scaled output to {out_dir}; factor={ouput.factor:.6g}")
 
 
 def _suite(args: argparse.Namespace) -> None:
@@ -85,7 +85,7 @@ def _suite(args: argparse.Namespace) -> None:
         read_motion_csv(item["input"], unit=item.get("unit", suite_cfg.get("unit", "g")), name=item.get("name"))
         for item in suite_cfg["records"]
     ]
-    ouput, geo = scale_suite_to_target(
+    output, geo = scale_suite_to_target(
         motions,
         target_periods,
         target_sa,
@@ -94,19 +94,19 @@ def _suite(args: argparse.Namespace) -> None:
         period_range=as_period_range(suite_cfg.get("period_range")),
         factor_bounds=tuple(suite_cfg.get("factor_bounds", [0.2, 5.0])),
     )
-    out_dir = Path(suite_cfg.get("output_dir", "examples/ouput/suite"))
+    out_dir = Path(suite_cfg.get("output_dir", "examples/ouputs/suite"))
     out_dir.mkdir(parents=True, exist_ok=True)
     plot_series = {"target": target_sa, "suite_geo_mean": geo}
     summary = {}
-    for result in ouput:
-        write_motion_csv(out_dir / f"{result.motion.name}.csv", result.motion, unit=suite_cfg.get("output_unit", "g"))
-        base_name = result.motion.name.removesuffix("_scaled")
-        plot_series[base_name] = result.scaled_sa_g
-        summary[base_name] = result.factor
+    for ouput in output:
+        write_motion_csv(out_dir / f"{ouput.motion.name}.csv", ouput.motion, unit=suite_cfg.get("output_unit", "g"))
+        base_name = ouput.motion.name.removesuffix("_scaled")
+        plot_series[base_name] = ouput.scaled_sa_g
+        summary[base_name] = ouput.factor
     write_spectrum_csv(out_dir / "suite_geomean.csv", target_periods, geo)
     write_json(out_dir / "suite_factors.json", summary)
     save_spectrum_plot(out_dir / "suite_scaling.png", target_periods, plot_series, title="Suite scaling")
-    print(f"Wrote suite ouput to {out_dir}")
+    print(f"Wrote suite output to {out_dir}")
 
 
 def _match(args: argparse.Namespace) -> None:
@@ -115,7 +115,7 @@ def _match(args: argparse.Namespace) -> None:
     match_cfg = data.get("match", {})
     motion = read_motion_csv(io_cfg["input"], unit=io_cfg.get("unit", "g"), name=io_cfg.get("name"))
     target_periods, target_sa = read_spectrum_csv(match_cfg["target_spectrum"])
-    result = frequency_domain_spectral_match(
+    ouput = frequency_domain_spectral_match(
         motion,
         target_periods,
         target_sa,
@@ -126,19 +126,19 @@ def _match(args: argparse.Namespace) -> None:
         highpass_hz=match_cfg.get("highpass_hz", 0.05),
         lowpass_hz=match_cfg.get("lowpass_hz"),
     )
-    out_dir = Path(io_cfg.get("output_dir", "examples/ouput/match"))
+    out_dir = Path(io_cfg.get("output_dir", "examples/ouputs/match"))
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = io_cfg.get("output_stem", motion.name)
-    write_motion_csv(out_dir / f"{stem}_matched.csv", result.motion, unit=io_cfg.get("output_unit", "g"))
-    write_spectrum_csv(out_dir / f"{stem}_matched_spectrum.csv", result.periods, result.scaled_sa_g)
-    write_json(out_dir / f"{stem}_match.json", {"method": result.method, "final_factor": result.factor, "metrics": motion_metrics(result.motion)})
+    write_motion_csv(out_dir / f"{stem}_matched.csv", ouput.motion, unit=io_cfg.get("output_unit", "g"))
+    write_spectrum_csv(out_dir / f"{stem}_matched_spectrum.csv", ouput.periods, ouput.scaled_sa_g)
+    write_json(out_dir / f"{stem}_match.json", {"method": ouput.method, "final_factor": ouput.factor, "metrics": motion_metrics(ouput.motion)})
     save_spectrum_plot(
         out_dir / f"{stem}_match.png",
-        result.periods,
-        {"matched": result.scaled_sa_g, "target": result.target_sa_g},
+        ouput.periods,
+        {"matched": ouput.scaled_sa_g, "target": ouput.target_sa_g},
         title=f"{stem} frequency-domain match",
     )
-    print(f"Wrote matched ouput to {out_dir}")
+    print(f"Wrote matched output to {out_dir}")
 
 
 def build_parser() -> argparse.ArgumentParser:

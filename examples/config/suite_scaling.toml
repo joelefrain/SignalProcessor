@@ -1,6 +1,6 @@
 [suite]
 target_spectrum = "examples/data/response_spectrum/EPU_475.csv"
-output_dir = "examples/ouput/suite"
+output_dir = "examples/ouputs/suite"
 unit = "g"
 output_unit = "g"
 method = "log_least_squares"

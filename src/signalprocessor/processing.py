@@ -6,8 +6,8 @@ from typing import Any
 
 import numpy as np
 
-from .baseline import BaselineResult, correct_baseline
-from .filtering import FilterResult, butterworth_filter
+from .baseline import Baselineouput, correct_baseline
+from .filtering import Filterouput, butterworth_filter
 from .integration import integrate_motion
 from .metrics import motion_metrics
 from .motion import Motion
@@ -60,10 +60,10 @@ class ProcessConfig:
 
 
 @dataclass(slots=True)
-class ProcessResult:
+class Processouput:
     raw: Motion
-    baseline: BaselineResult
-    filtered: FilterResult
+    baseline: Baselineouput
+    filtered: Filterouput
     velocity_m_s: np.ndarray
     displacement_m: np.ndarray
     metrics: dict[str, float]
@@ -71,7 +71,7 @@ class ProcessResult:
     config: ProcessConfig
 
 
-def process_motion(motion: Motion, config: ProcessConfig | dict[str, Any] | None = None) -> ProcessResult:
+def process_motion(motion: Motion, config: ProcessConfig | dict[str, Any] | None = None) -> Processouput:
     cfg = config if isinstance(config, ProcessConfig) else ProcessConfig.from_dict(config or {})
     baseline = correct_baseline(
         motion,
@@ -94,7 +94,7 @@ def process_motion(motion: Motion, config: ProcessConfig | dict[str, Any] | None
     metrics = motion_metrics(filtered.motion)
     periods = logspace_periods(cfg.spectrum_min_period, cfg.spectrum_max_period, cfg.spectrum_points)
     spectrum = response_spectrum(filtered.motion, periods, damping=cfg.damping)
-    return ProcessResult(motion, baseline, filtered, velocity, displacement, metrics, spectrum, cfg)
+    return Processouput(motion, baseline, filtered, velocity, displacement, metrics, spectrum, cfg)
 
 
 def period_grid_from_config(data: dict[str, Any]) -> np.ndarray:

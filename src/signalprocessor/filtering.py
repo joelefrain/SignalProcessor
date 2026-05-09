@@ -9,7 +9,7 @@ from .motion import Motion
 
 
 @dataclass(slots=True)
-class FilterResult:
+class Filterouput:
     motion: Motion
     info: dict[str, float | int | str | bool | None]
 
@@ -43,11 +43,11 @@ def butterworth_filter(
     taper_fraction: float = 0.02,
     pad_seconds: float = 5.0,
     pad_mode: str = "edge",
-) -> FilterResult:
+) -> Filterouput:
     hp = None if highpass_hz in (None, 0) else float(highpass_hz)
     lp = None if lowpass_hz in (None, 0) else float(lowpass_hz)
     if hp is None and lp is None:
-        return FilterResult(motion, {"type": "none"})
+        return Filterouput(motion, {"type": "none"})
     if hp is not None and hp <= 0.0:
         raise ValueError("highpass_hz must be positive.")
     if lp is not None and lp <= 0.0:
@@ -106,4 +106,4 @@ def butterworth_filter(
         "pad_seconds": float(pad_seconds),
         "pad_samples": int(n_pad),
     }
-    return FilterResult(out, info)
+    return Filterouput(out, info)
