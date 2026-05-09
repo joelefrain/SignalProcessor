@@ -1,0 +1,120 @@
+# =========================
+# OS files
+# =========================
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# =========================
+# Logs
+# =========================
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# =========================
+# Environment variables
+# =========================
+.env
+.env.*
+*.env
+
+# =========================
+# Dependency directories
+# =========================
+node_modules/
+vendor/
+
+# =========================
+# Build outputs
+# =========================
+mnt/
+dist/
+build/
+output/
+output_*/
+coverage/
+
+# =========================
+# Cache
+# =========================
+.cache/
+.tmp/
+temp/
+*.cache
+
+# =========================
+# IDEs / Editors
+# =========================
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.sqlite3
+venv/
+env/
+.venv/
+
+# =========================
+# Node / JavaScript
+# =========================
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# =========================
+# Java
+# =========================
+*.class
+*.jar
+*.war
+target/
+
+# =========================
+# C / C++
+# =========================
+*.o
+*.obj
+*.exe
+*.out
+
+# =========================
+# Misc
+# =========================
+*.bak
+*.tmp
+*.swp
+*.old
+
+# =========================
+# Docker
+# =========================
+docker-compose.override.yml
+
+# =========================
+# Testing
+# =========================
+coverage/
+.nyc_output/
+
+# =========================
+# Secrets
+# =========================
+*.pem
+*.key
+*.crt
