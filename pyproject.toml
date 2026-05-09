@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Procesamiento rapido de acelerogramas: correccion, filtrado, espectros y escalamiento sismico."
 readme = "README.md"
 requires-python = ">=3.10"
-authors = [{ name = "Prismo" }]
+authors = [{ name = "Joel Alarcon" }]
 dependencies = [
     "numpy>=1.24",
     "scipy>=1.10",
@@ -18,17 +18,3 @@ dependencies = [
     "tomli>=2.0; python_version<'3.11'",
 ]
 
-[project.optional-dependencies]
-dev = ["pytest>=8"]
-
-[project.scripts]
-signalprocessor = "signalprocessor.cli:main"
-
-[tool.setuptools]
-py-modules = ["benchmark"]
-
-[tool.setuptools.packages.find]
-where = ["src"]
-
-[tool.setuptools.package-data]
-signalprocessor = ["py.typed"]
