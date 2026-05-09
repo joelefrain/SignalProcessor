@@ -11,6 +11,7 @@ from .io import read_motion, read_target_spectrum
 from .matching import MatchingConfig, match_spectrum
 from .metrics import compute_ground_motion_parameters
 from .processing import CorrectionConfig, correct_record
+from .recommendation import recommend_correction_method
 from .scaling import linear_scale, spectral_misfit
 from .spectra import response_spectrum
 
@@ -30,7 +31,13 @@ def compare_correction_to_usgs(
     config: CorrectionConfig | None = None,
 ) -> BenchmarkRow:
     raw = read_motion(uncorrected_path)
-    ours = correct_record(raw, config or CorrectionConfig()).record.as_units("cm/s^2")
+    if config is None:
+        correction = recommend_correction_method(raw).best
+        ours = correction.result.record.as_units("cm/s^2")
+        notes = correction.name
+    else:
+        ours = correct_record(raw, config).record.as_units("cm/s^2")
+        notes = "custom_config"
     reference = read_motion(corrected_path, units="cm/s^2")
     n = min(ours.npts, reference.npts)
     ref = reference.acceleration[:n]
@@ -38,7 +45,7 @@ def compare_correction_to_usgs(
     scale = max(float(np.max(np.abs(ref))), np.finfo(float).eps)
     rms = float(np.sqrt(np.mean((got - ref) ** 2)) / scale)
     pga_ratio = float(np.max(np.abs(got)) / scale)
-    return BenchmarkRow(name=Path(str(uncorrected_path)).stem, pga_ratio=pga_ratio, rms_acc_error=rms)
+    return BenchmarkRow(name=Path(str(uncorrected_path)).stem, pga_ratio=pga_ratio, rms_acc_error=rms, notes=notes)
 
 
 def batch_usgs_benchmark(root: str | Path) -> pd.DataFrame:
