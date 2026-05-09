@@ -17,6 +17,7 @@ Los casos de uso viven como notebooks en `notebooks/`:
 - `03_escalamiento_lineal.ipynb`
 - `04_escalamiento_suite.ipynb`
 - `05_ajuste_espectral_rapido.ipynb`
+- `06_benchmark_seismomatch.ipynb`
 
 Tambien se puede usar la CLI:
 
