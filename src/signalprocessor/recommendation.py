@@ -44,6 +44,7 @@ class CorrectionParameterSuggestion:
     highpass_hz_candidates: tuple[float | None, ...]
     lowpass_hz: float | None
     filter_order: int
+    filter_types: tuple[str, ...]
     zero_phase: bool
     constrain_final_velocity: bool
     include_final_displacement_constraint: bool
@@ -60,6 +61,7 @@ class CorrectionParameterSuggestion:
             "lowpass_hz": self.lowpass_hz,
             "taper_fraction": self.taper_fraction,
             "filter_order": self.filter_order,
+            "filter_types": ", ".join(self.filter_types),
             "despike": self.despike,
             "spike_sigma": self.spike_sigma,
             "constrain_final_velocity": self.constrain_final_velocity,
@@ -106,9 +108,12 @@ class CorrectionCandidateEvaluation:
             "baseline_order": cfg.baseline_order,
             "highpass_hz": cfg.highpass_hz,
             "lowpass_hz": cfg.lowpass_hz,
+            "filter_type": cfg.filter_type,
             "taper_fraction": cfg.taper_fraction,
+            "post_filter_baseline_order": cfg.post_filter_baseline_order,
             "final_velocity_constraint": cfg.constrain_final_velocity,
             "final_displacement_constraint": cfg.constrain_final_displacement,
+            "post_filter_displacement_constraint": cfg.post_filter_constrain_final_displacement,
             "final_velocity_ratio": self.final_velocity_ratio,
             "final_displacement_ratio": self.final_displacement_ratio,
             "final_displacement_pgv_seconds": self.final_displacement_pgv_seconds,
@@ -134,6 +139,83 @@ class CorrectionRecommendation:
 
     def to_rows(self) -> list[dict[str, float | str | bool | None]]:
         return [candidate.to_row() for candidate in self.candidates]
+
+
+DEFAULT_RECOMMENDATION_FILTER_TYPES = ("butterworth", "cheby1", "cheby2", "ellip", "bessel")
+
+_FILTER_TYPE_ALIASES = {
+    "all": "__all__",
+    "todos": "__all__",
+    "todas": "__all__",
+    "*": "__all__",
+    "butter": "butterworth",
+    "butterworth": "butterworth",
+    "cheby1": "cheby1",
+    "chebyshev": "cheby1",
+    "chebyshev1": "cheby1",
+    "chebyshev_i": "cheby1",
+    "chevyshev": "cheby1",
+    "chevyshev1": "cheby1",
+    "chevyshev_i": "cheby1",
+    "cheby2": "cheby2",
+    "chebyshev2": "cheby2",
+    "chebyshev_ii": "cheby2",
+    "chevyshev2": "cheby2",
+    "chevyshev_ii": "cheby2",
+    "ellip": "ellip",
+    "elliptic": "ellip",
+    "eliptico": "ellip",
+    "elíptico": "ellip",
+    "cauer": "ellip",
+    "bessel": "bessel",
+    "bessel_thomson": "bessel",
+}
+
+
+def normalize_recommendation_filter_types(filter_types: str | Iterable[str] | None = None) -> tuple[str, ...]:
+    """Normalize the filter families used by the automatic recommendation.
+
+    ``None``, ``"all"``, ``"todos"`` or ``"*"`` means all supported IIR
+    families. A string can contain one family or a comma/semicolon-separated
+    list, for example ``"bessel, cheby2"``. The returned names are canonical
+    and de-duplicated while preserving order.
+    """
+
+    if filter_types is None:
+        return DEFAULT_RECOMMENDATION_FILTER_TYPES
+
+    if isinstance(filter_types, str):
+        raw_text = filter_types.strip()
+        if not raw_text:
+            return DEFAULT_RECOMMENDATION_FILTER_TYPES
+        raw_values = [part.strip() for part in raw_text.replace(";", ",").split(",")]
+    else:
+        raw_values = list(filter_types)
+
+    normalized: list[str] = []
+    for value in raw_values:
+        if value is None:
+            continue
+        key = str(value).strip().lower().replace("-", "_").replace(" ", "_")
+        if not key:
+            continue
+        try:
+            family = _FILTER_TYPE_ALIASES[key]
+        except KeyError as exc:
+            valid = ", ".join(DEFAULT_RECOMMENDATION_FILTER_TYPES)
+            aliases = ", ".join(sorted(k for k, v in _FILTER_TYPE_ALIASES.items() if v != "__all__"))
+            raise ValueError(
+                f"Unsupported recommendation filter type {value!r}. "
+                f"Valid canonical families: {valid}. Accepted aliases: {aliases}."
+            ) from exc
+        if family == "__all__":
+            return DEFAULT_RECOMMENDATION_FILTER_TYPES
+        if family not in normalized:
+            normalized.append(family)
+
+    if not normalized:
+        raise ValueError("At least one filter family must be provided, or use filter_types='all'.")
+    return tuple(normalized)
 
 
 def _time_at_fraction(time: np.ndarray, cumulative: np.ndarray, fraction: float) -> float:
@@ -297,7 +379,9 @@ def recommend_correction_parameters(
     record: MotionRecord,
     *,
     snr_threshold: float = 3.0,
+    filter_types: str | Iterable[str] | None = None,
 ) -> CorrectionParameterSuggestion:
+    selected_filter_types = normalize_recommendation_filter_types(filter_types)
     windows = estimate_event_windows(record)
     hp, lp, snr_available, snr_notes = _estimate_snr_filter_corners(record, windows, snr_threshold=snr_threshold)
     drift_label, vend_ratio, dend_ratio = _drift_severity(record)
@@ -325,6 +409,7 @@ def recommend_correction_parameters(
         f"Ventana pre-evento estimada: {windows.pre_event_seconds if windows.pre_event_seconds is not None else 'no disponible'} s.",
         f"Deriva cruda: velocidad final/PGV={vend_ratio:.3g}, desplazamiento final/PGD={dend_ratio:.3g}; severidad {drift_label}.",
         f"Despiking {'activado' if despike else 'no requerido'}; candidatos detectados={spike_count}.",
+        f"Familias de filtro evaluadas: {', '.join(selected_filter_types)}.",
         *snr_notes,
         "Se evaluan ordenes bajos de baseline, sensibilidad de high-pass y candidatos de control de deriva de largo periodo.",
     ]
@@ -339,6 +424,7 @@ def recommend_correction_parameters(
         highpass_hz_candidates=tuple(hp_candidates),
         lowpass_hz=lp,
         filter_order=4,
+        filter_types=selected_filter_types,
         zero_phase=True,
         constrain_final_velocity=True,
         include_final_displacement_constraint=include_displacement_constraint,
@@ -349,12 +435,25 @@ def recommend_correction_parameters(
     )
 
 
+def _candidate_filter_suffix(filter_type: str) -> str:
+    key = filter_type.lower().replace("-", "_")
+    if key in {"butter", "butterworth"}:
+        return ""
+    return f"_{key}"
+
+
 def build_correction_candidates(
     record: MotionRecord,
     *,
     parameters: CorrectionParameterSuggestion | None = None,
+    filter_types: str | Iterable[str] | None = None,
 ) -> tuple[CorrectionCandidate, ...]:
-    params = parameters or recommend_correction_parameters(record)
+    if parameters is None:
+        params = recommend_correction_parameters(record, filter_types=filter_types)
+    elif filter_types is not None:
+        params = replace(parameters, filter_types=normalize_recommendation_filter_types(filter_types))
+    else:
+        params = parameters
     base = CorrectionConfig(
         remove_mean=params.remove_mean,
         pre_event_seconds=params.windows.pre_event_seconds,
@@ -366,24 +465,62 @@ def build_correction_candidates(
         constrain_final_velocity=params.constrain_final_velocity,
     )
     candidates: list[CorrectionCandidate] = []
+    seen: set[tuple] = set()
+
+    def add_candidate(name: str, description: str, cfg: CorrectionConfig) -> None:
+        key = (
+            cfg.baseline_order,
+            cfg.highpass_hz,
+            cfg.lowpass_hz,
+            cfg.filter_type,
+            cfg.constrain_final_displacement,
+            cfg.post_filter_baseline_order,
+            cfg.post_filter_constrain_final_velocity,
+            cfg.post_filter_constrain_final_displacement,
+        )
+        if key in seen:
+            return
+        seen.add(key)
+        candidates.append(CorrectionCandidate(name=name, description=description, config=cfg))
+
+    filter_types = params.filter_types or ("butterworth",)
+    use_post_filter_drift_control = params.include_final_displacement_constraint or params.drift_severity in {"media", "alta"}
 
     for order in params.baseline_orders:
         for hp in params.highpass_hz_candidates:
-            cfg = replace(
-                base,
-                baseline_order=order,
-                highpass_hz=hp,
-                lowpass_hz=params.lowpass_hz if hp is not None else None,
-                constrain_final_displacement=False,
-            )
+            families = ("butterworth",) if hp is None else filter_types
             filter_label = "sin_filtro" if hp is None else f"hp_{hp:g}"
-            candidates.append(
-                CorrectionCandidate(
-                    name=f"baseline_{order}_{filter_label}",
-                    description=f"Baseline orden {order}, {filter_label}, filtro de fase cero y parametros estimados automaticamente.",
-                    config=cfg,
+            for filter_type in families:
+                suffix = _candidate_filter_suffix(filter_type) if hp is not None else ""
+                cfg = replace(
+                    base,
+                    baseline_order=order,
+                    highpass_hz=hp,
+                    lowpass_hz=params.lowpass_hz if hp is not None else None,
+                    filter_type=filter_type,
+                    constrain_final_displacement=False,
+                    post_filter_baseline_order=None,
+                    post_filter_constrain_final_velocity=True,
+                    post_filter_constrain_final_displacement=False,
                 )
-            )
+                add_candidate(
+                    f"baseline_{order}_{filter_label}{suffix}",
+                    f"Baseline orden {order}, {filter_label}, filtro {filter_type} de fase cero y parametros estimados automaticamente.",
+                    cfg,
+                )
+
+                if hp is not None and use_post_filter_drift_control:
+                    post_cfg = replace(
+                        cfg,
+                        post_filter_baseline_order=1,
+                        post_filter_constrain_final_velocity=True,
+                        post_filter_constrain_final_displacement=True,
+                    )
+                    add_candidate(
+                        f"baseline_{order}_{filter_label}{suffix}_postpoly_1_vf_df",
+                        "Baseline y filtro con correccion polinomial posterior para anular velocidad y desplazamiento final.",
+                        post_cfg,
+                    )
 
     if params.include_final_displacement_constraint:
         for order in params.baseline_orders:
@@ -393,14 +530,16 @@ def build_correction_candidates(
                     baseline_order=order,
                     highpass_hz=None,
                     lowpass_hz=None,
+                    filter_type="butterworth",
                     constrain_final_displacement=True,
+                    post_filter_baseline_order=1,
+                    post_filter_constrain_final_velocity=True,
+                    post_filter_constrain_final_displacement=True,
                 )
-                candidates.append(
-                    CorrectionCandidate(
-                        name=f"baseline_{order}_vf_df",
-                        description="Baseline con velocidad y desplazamiento final objetivo; revisar si puede haber desplazamiento permanente real.",
-                        config=cfg,
-                    )
+                add_candidate(
+                    f"baseline_{order}_vf_df",
+                    "Baseline con velocidad y desplazamiento final objetivo; revisar si puede haber desplazamiento permanente real.",
+                    cfg,
                 )
 
     return tuple(candidates)
@@ -461,6 +600,10 @@ def _complexity_penalty(config: CorrectionConfig) -> float:
     penalty = 0.05 * order
     if config.constrain_final_displacement:
         penalty += 0.25
+    if config.post_filter_baseline_order is not None and config.post_filter_baseline_order >= 0:
+        penalty += 0.06 * max(config.post_filter_baseline_order, 0) + 0.08
+        if config.post_filter_constrain_final_displacement:
+            penalty += 0.08
     if config.despike:
         penalty += 0.03
     return penalty
@@ -476,6 +619,11 @@ def _filter_penalty(config: CorrectionConfig, t_max: float) -> float:
             penalty += 0.30 * (t_max / cutoff_period)
     if config.lowpass_hz:
         penalty += 0.03
+    family = config.filter_type.lower().replace("-", "_")
+    if family in {"cheby1", "chebyshev", "chebyshev1", "chebyshev_i"}:
+        penalty += 0.03
+    elif family in {"cheby2", "chebyshev2", "chebyshev_ii", "ellip", "elliptic", "cauer"}:
+        penalty += 0.05
     if not config.zero_phase:
         penalty += 0.20
     return penalty
@@ -549,7 +697,11 @@ def _score_candidate(
         notes.append("cambio espectral moderado")
     if candidate.config.highpass_hz:
         notes.append(f"high-pass {candidate.config.highpass_hz:g} Hz")
-    if candidate.config.constrain_final_displacement:
+    if candidate.config.filter_type.lower() not in {"butter", "butterworth"}:
+        notes.append(f"filtro {candidate.config.filter_type}")
+    if candidate.config.post_filter_baseline_order is not None:
+        notes.append(f"polinomio post-filtro orden {candidate.config.post_filter_baseline_order}")
+    if candidate.config.constrain_final_displacement or candidate.config.post_filter_constrain_final_displacement:
         notes.append("impone desplazamiento final; revisar fling-step")
 
     result.diagnostics["recommendation_method"] = candidate.name
@@ -586,6 +738,7 @@ def recommend_correction_method(
     t_max: float = 3.0,
     damping: float = 0.05,
     snr_threshold: float = 3.0,
+    filter_types: str | Iterable[str] | None = None,
 ) -> CorrectionRecommendation:
     """Recommend correction parameters and the best correction result.
 
@@ -597,7 +750,11 @@ def recommend_correction_method(
     """
 
     per = np.geomspace(t_min, t_max, 40) if periods is None else np.asarray(periods, dtype=np.float64)
-    parameter_suggestion = recommend_correction_parameters(record, snr_threshold=snr_threshold)
+    parameter_suggestion = recommend_correction_parameters(
+        record,
+        snr_threshold=snr_threshold,
+        filter_types=filter_types,
+    )
     raw_metrics = compute_ground_motion_parameters(record)
     candidate_list = tuple(candidates) if candidates is not None else build_correction_candidates(
         record,
@@ -619,6 +776,7 @@ def recommend_correction_method(
     best = ranked[0]
     decision_notes = (
         f"Metodo recomendado: {best.name}.",
+        f"Familias de filtro consideradas: {', '.join(parameter_suggestion.filter_types)}.",
         "Los parametros se estimaron con ventanas Arias, SNR Fourier, drift terminal y sensibilidad de baseline/filtro.",
         "La seleccion penaliza desplazamiento/velocidad de largo periodo no fisicos, deriva y tendencia post-evento sin distorsionar excesivamente PGA, Arias, CAV ni espectro.",
         "Si el registro puede contener desplazamiento permanente fisico, revise manualmente candidatos con desplazamiento final impuesto.",

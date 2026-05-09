@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import csv
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -8,6 +10,7 @@ import numpy as np
 from .io import read_motion, read_target_spectrum, write_motion_csv, write_seismomatch_txt
 from .matching import MatchingConfig, match_spectrum
 from .processing import CorrectionConfig, correct_record
+from .recommendation import recommend_correction_method
 from .scaling import linear_scale
 from .spectra import response_spectrum
 
@@ -27,12 +30,72 @@ def cmd_correct(args) -> None:
         constrain_final_velocity=not args.no_final_velocity_constraint,
         constrain_final_displacement=args.final_displacement_constraint,
         despike=not args.no_despike,
+        taper_fraction=args.taper_fraction,
+        filter_order=args.filter_order,
+        filter_type=args.filter_type,
+        filter_ripple_db=args.filter_ripple_db,
+        filter_attenuation_db=args.filter_attenuation_db,
+        bessel_norm=args.bessel_norm,
+        zero_phase=not args.causal_filter,
+        post_filter_baseline_order=args.post_filter_baseline_order,
+        post_filter_constrain_final_velocity=not args.no_post_filter_final_velocity_constraint,
+        post_filter_constrain_final_displacement=args.post_filter_final_displacement_constraint,
     )
     result = correct_record(rec, cfg)
     write_motion_csv(result.record, args.output, units=args.output_units)
     print(f"wrote {args.output}")
     print(f"PGA={result.metrics.pga / 9.80665:.4g} g PGV={result.metrics.pgv:.4g} m/s PGD={result.metrics.pgd:.4g} m")
 
+
+
+
+def cmd_recommend(args) -> None:
+    rec = read_motion(args.input, units=args.units)
+    periods = _periods(args)
+    recommendation = recommend_correction_method(
+        rec,
+        periods=periods,
+        t_min=float(periods[0]),
+        t_max=float(periods[-1]),
+        damping=args.damping,
+        snr_threshold=args.snr_threshold,
+        filter_types=args.filter_types,
+    )
+
+    print("\n".join(recommendation.decision_notes))
+    print("Notas de parametros:")
+    for note in recommendation.parameter_suggestion.notes:
+        print(f"- {note}")
+
+    rows = recommendation.to_rows()[: max(1, args.top)]
+    fields = [
+        "method",
+        "score",
+        "filter_type",
+        "baseline_order",
+        "highpass_hz",
+        "lowpass_hz",
+        "post_filter_baseline_order",
+        "final_displacement_constraint",
+        "post_filter_displacement_constraint",
+        "final_velocity_ratio",
+        "final_displacement_ratio",
+        "pgd_pgv_seconds",
+        "spectral_rms_log_change",
+    ]
+
+    if args.output:
+        out = Path(args.output)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with out.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(rows)
+        print(f"wrote {args.output}")
+    else:
+        writer = csv.DictWriter(sys.stdout, fieldnames=fields, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
 
 def cmd_spectrum(args) -> None:
     rec = read_motion(args.input, units=args.units)
@@ -87,10 +150,34 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--highpass", type=float, default=0.05)
     p.add_argument("--lowpass", type=float)
     p.add_argument("--baseline-order", type=int, default=1)
+    p.add_argument("--taper-fraction", type=float, default=0.02)
+    p.add_argument("--filter-order", type=int, default=4)
+    p.add_argument("--filter-type", default="butterworth", choices=["butterworth", "cheby1", "cheby2", "chebyshev", "chebyshev2", "chevyshev", "chevyshev2", "ellip", "bessel"])
+    p.add_argument("--filter-ripple-db", type=float, default=0.5)
+    p.add_argument("--filter-attenuation-db", type=float, default=40.0)
+    p.add_argument("--bessel-norm", default="phase", choices=["phase", "delay", "mag"])
+    p.add_argument("--causal-filter", action="store_true")
     p.add_argument("--no-final-velocity-constraint", action="store_true")
     p.add_argument("--final-displacement-constraint", action="store_true")
+    p.add_argument("--post-filter-baseline-order", type=int)
+    p.add_argument("--no-post-filter-final-velocity-constraint", action="store_true")
+    p.add_argument("--post-filter-final-displacement-constraint", action="store_true")
     p.add_argument("--no-despike", action="store_true")
     p.set_defaults(func=cmd_correct)
+
+    p = sub.add_parser("recommend")
+    p.add_argument("input")
+    p.add_argument("--units")
+    p.add_argument("--filter-types", default="all", help="all, butterworth, bessel, cheby1, cheby2, ellip or a comma-separated list")
+    p.add_argument("--snr-threshold", type=float, default=3.0)
+    p.add_argument("--damping", type=float, default=0.05)
+    p.add_argument("--t-min", type=float, default=0.05)
+    p.add_argument("--t-max", type=float, default=3.0)
+    p.add_argument("--n-periods", type=int, default=40)
+    p.add_argument("--periods")
+    p.add_argument("--top", type=int, default=12)
+    p.add_argument("--output")
+    p.set_defaults(func=cmd_recommend)
 
     p = sub.add_parser("spectrum", parents=[common_periods])
     p.add_argument("input")
