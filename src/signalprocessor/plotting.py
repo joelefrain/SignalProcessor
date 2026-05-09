@@ -19,7 +19,9 @@ def save_motion_plot(
 ) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    fig, axes = plt.subplots(3, 1, figsize=(11, 7), sharex=True, constrained_layout=True)
+    fig, axes = plt.subplots(
+        3, 1, figsize=(11, 7), sharex=True, constrained_layout=True
+    )
     axes[0].plot(motion.time, motion.accel / G0, lw=0.8, color="#1f77b4")
     axes[0].set_ylabel("a (g)")
     axes[1].plot(motion.time, velocity_m_s * 100.0, lw=0.8, color="#2ca02c")

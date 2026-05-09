@@ -87,7 +87,9 @@ def write_spectrum_csv(
         columns.append(np.asarray(values, dtype=np.float64))
         names.append(key)
     data = np.column_stack(columns)
-    np.savetxt(path, data, delimiter=",", fmt="%.10g", header=",".join(names), comments="")
+    np.savetxt(
+        path, data, delimiter=",", fmt="%.10g", header=",".join(names), comments=""
+    )
 
 
 def write_json(path: str | Path, data: dict[str, Any]) -> None:

@@ -524,7 +524,7 @@ Criterios para elegir:
 2. **Ventanas quietas:** el polinomio debe ajustarse preferentemente a tramos donde se conoce o se espera ausencia de movimiento.
 3. **No borrar física:** si el registro contiene pulso de velocidad o desplazamiento permanente, no imponer cero desplazamiento final sin evidencia.
 4. **Comparar espectros:** el polinomio no debe alterar significativamente el espectro dentro del rango de periodos de interés.
-5. **Repetibilidad:** si pequeñas variaciones en la ventana producen ouputados muy distintos, el registro no es confiable para largo periodo.
+5. **Repetibilidad:** si pequeñas variaciones en la ventana producen resultados muy distintos, el registro no es confiable para largo periodo.
 
 ---
 
@@ -1192,7 +1192,7 @@ Un procesamiento puede considerarse aceptable si:
 3. Velocidad y desplazamiento son coherentes.
 4. El espectro no fue alterado artificialmente en el rango de diseño.
 5. Los filtros y baseline están documentados.
-6. El ouputado es estable frente a perturbaciones razonables.
+6. El resultado es estable frente a perturbaciones razonables.
 7. La corrección no elimina rasgos físicos relevantes.
 
 ---
@@ -1675,6 +1675,973 @@ También revisar visualmente:
 
 ---
 
+## 20.10. Escalamiento sísmico mediante wavelets
+
+Esta sección amplía el uso de wavelets en el ajuste espectral de acelerogramas. En ingeniería sísmica, el término se usa principalmente en dos familias de métodos:
+
+1. **Métodos de ajuste en el dominio del tiempo**, tipo Lilhanand-Tseng, Abrahamson, Hancock et al. y Al Atik-Abrahamson. Estos modifican el acelerograma sumando pequeñas funciones wavelet localizadas alrededor de los tiempos donde los osciladores SDOF alcanzan sus máximos.
+2. **Métodos basados en transformada wavelet continua, CWT.** Estos descomponen la señal en detalle tiempo-escala, modifican los coeficientes o funciones de detalle según el cociente entre espectro objetivo y espectro actual, y reconstruyen la señal.
+
+Ambas familias buscan que el registro modificado conserve lo máximo posible la no estacionariedad del registro semilla, es decir, que mantenga su distribución temporal de energía, duración, pulsos dominantes y evolución de frecuencias.
+
+### 20.10.1. Problema matemático del ajuste espectral
+
+Sea $a_0(t)$ el acelerograma semilla ya corregido, filtrado y convertido a unidades consistentes. Se desea construir:
+
+$$
+a_m(t)=a_0(t)+\Delta a(t)
+$$
+
+tal que su espectro de respuesta, para un conjunto de periodos $T_j$ y amortiguamiento $\xi$, satisfaga:
+
+$$
+S_{a,m}(T_j,\xi)\approx S_{a,\text{obj}}(T_j,\xi),
+\qquad j=1,\ldots,N_T
+$$
+
+El error puede definirse en forma lineal:
+
+$$
+e_j=S_{a,\text{obj}}(T_j)-S_{a,m}(T_j)
+$$
+
+o en forma logarítmica:
+
+$$
+e_j=\ln\left[\frac{S_{a,\text{obj}}(T_j)}{S_{a,m}(T_j)}\right]
+$$
+
+La forma logarítmica suele ser más estable porque penaliza razones espectrales y no diferencias absolutas.
+
+El acelerograma modificado se expresa como:
+
+$$
+a_m(t)=\alpha a_0(t)+\sum_{k=1}^{N_w} c_k \psi_k(t)
+$$
+
+donde:
+
+- $\alpha$ es un factor de escala lineal previo;
+- $\psi_k(t)$ es una wavelet de ajuste;
+- $c_k$ es el coeficiente de amplitud de la wavelet;
+- $N_w$ es el número de wavelets usadas en una iteración.
+
+El factor $\alpha$ debe aplicarse antes del ajuste wavelet para que la corrección requerida sea pequeña. Si el registro semilla tiene forma espectral muy distinta al objetivo, el método puede converger matemáticamente pero producir una señal físicamente pobre.
+
+### 20.10.2. Oscilador SDOF y sensibilidad espectral
+
+Para cada periodo $T_j$, la respuesta relativa $u_j(t)$ del oscilador lineal cumple:
+
+$$
+\ddot u_j(t)+2\xi\omega_j\dot u_j(t)+\omega_j^2u_j(t)=-a_m(t)
+$$
+
+$$
+\omega_j=\frac{2\pi}{T_j}
+$$
+
+$$
+\omega_{d,j}=\omega_j\sqrt{1-\xi^2}
+$$
+
+La respuesta impulsional de desplazamiento relativo para entrada de aceleración de base es:
+
+$$
+h_j(t)=\frac{1}{\omega_{d,j}}e^{-\xi\omega_jt}\sin(\omega_{d,j}t)H(t)
+$$
+
+donde $H(t)$ es la función escalón. La respuesta relativa del oscilador ante una wavelet unitaria $\psi_k(t)$ es:
+
+$$
+u_{jk}^{\psi}(t)=-\int_0^t \psi_k(\tau)h_j(t-\tau)d\tau
+$$
+
+Si el ajuste se realiza sobre pseudoaceleración:
+
+$$
+q_j(t)=\omega_j^2u_j(t)
+$$
+
+$$
+S_{a,j}=\max_t |q_j(t)|
+$$
+
+La contribución de la wavelet $k$ a la pseudoaceleración del oscilador $j$ es:
+
+$$
+q_{jk}^{\psi}(t)=\omega_j^2u_{jk}^{\psi}(t)
+$$
+
+Sea:
+
+$$
+t_j^*=\arg\max_t |q_j(t)|
+$$
+
+$$
+s_j=\operatorname{sign}[q_j(t_j^*)]
+$$
+
+La hipótesis central del método linealizado es que, durante una iteración, el tiempo de máximo $t_j^*$ no cambia significativamente al añadir las wavelets. Entonces:
+
+$$
+\Delta S_{a,j}\approx s_j\sum_{k=1}^{N_w}c_k q_{jk}^{\psi}(t_j^*)
+$$
+
+Definiendo la matriz de sensibilidad:
+
+$$
+A_{jk}=s_j q_{jk}^{\psi}(t_j^*)
+$$
+
+se obtiene:
+
+$$
+\Delta \mathbf S \approx \mathbf A\mathbf c
+$$
+
+donde:
+
+$$
+\Delta \mathbf S=
+\begin{bmatrix}
+S_{a,\text{obj}}(T_1)-S_{a,m}(T_1)\\
+\vdots\\
+S_{a,\text{obj}}(T_{N_T})-S_{a,m}(T_{N_T})
+\end{bmatrix}
+$$
+
+$$
+\mathbf c=
+\begin{bmatrix}
+c_1\\
+\vdots\\
+c_{N_w}
+\end{bmatrix}
+$$
+
+Si se usa error logarítmico:
+
+$$
+\Delta \ln S_{a,j}
+\approx
+\frac{\Delta S_{a,j}}{S_{a,j}}
+$$
+
+por lo que:
+
+$$
+B_{jk}=\frac{A_{jk}}{S_{a,j}}
+$$
+
+$$
+\mathbf e\approx \mathbf B\mathbf c
+$$
+
+Esta es la ecuación básica del ajuste espectral por wavelets.
+
+### 20.10.3. Solución de los coeficientes de wavelets
+
+Los coeficientes se obtienen por mínimos cuadrados ponderados:
+
+$$
+\min_{\mathbf c}
+\left\|
+\mathbf W^{1/2}(\mathbf e-\mathbf B\mathbf c)
+\right\|^2
+$$
+
+La solución normal es:
+
+$$
+\mathbf c=(\mathbf B^T\mathbf W\mathbf B)^{-1}\mathbf B^T\mathbf W\mathbf e
+$$
+
+Para mejorar estabilidad se usa regularización:
+
+$$
+\mathbf c=(\mathbf B^T\mathbf W\mathbf B+\lambda^2\mathbf I)^{-1}
+\mathbf B^T\mathbf W\mathbf e
+$$
+
+donde $\lambda$ controla la magnitud de la modificación. Una forma robusta usa descomposición en valores singulares:
+
+$$
+\mathbf B=\mathbf U\boldsymbol\Sigma\mathbf V^T
+$$
+
+$$
+\mathbf c=
+\mathbf V
+\operatorname{diag}\left(
+\frac{\sigma_i}{\sigma_i^2+\lambda^2}
+\right)
+\mathbf U^T\mathbf e
+$$
+
+Si un valor singular $\sigma_i$ es demasiado pequeño, la solución amplifica ruido o genera coeficientes excesivos. Por eso los programas de spectral matching suelen usar un parámetro de valor propio mínimo o valor singular mínimo.
+
+### 20.10.4. Actualización iterativa
+
+En la iteración $r$:
+
+$$
+a^{(r+1)}(t)=a^{(r)}(t)+\gamma\sum_{k=1}^{N_w}c_k^{(r)}\psi_k(t)
+$$
+
+donde $0<\gamma\le 1$ es un factor de relajación. Si $\gamma=1$, se aplica toda la corrección calculada; si hay divergencia o sobreajuste, se reduce.
+
+Luego:
+
+1. se recalcula la respuesta SDOF;
+2. se obtiene el nuevo espectro;
+3. se actualiza el error;
+4. se repite hasta cumplir tolerancia.
+
+Criterios de convergencia:
+
+$$
+\max_j
+\left|
+\ln\left(\frac{S_{a,m}(T_j)}{S_{a,\text{obj}}(T_j)}\right)
+\right|
+\le \varepsilon_{\max}
+$$
+
+o:
+
+$$
+\max_j
+\left|
+\frac{S_{a,m}(T_j)-S_{a,\text{obj}}(T_j)}
+{S_{a,\text{obj}}(T_j)}
+\right|
+\le \varepsilon_{\max}
+$$
+
+También se puede controlar el error RMS:
+
+$$
+\varepsilon_{RMS}=
+\sqrt{
+\frac{1}{N_T}
+\sum_{j=1}^{N_T}
+\left[
+\ln\left(\frac{S_{a,m}(T_j)}{S_{a,\text{obj}}(T_j)}\right)
+\right]^2
+}
+$$
+
+### 20.10.5. Elección de la wavelet de ajuste
+
+Una wavelet de ajuste se define por tres parámetros principales:
+
+$$
+\psi_k(t)=\psi(t;t_k,T_k,N_{c,k})
+$$
+
+donde:
+
+- $t_k$: centro temporal de la wavelet;
+- $T_k$: periodo dominante asociado;
+- $N_{c,k}$: número de ciclos o longitud efectiva de la wavelet.
+
+Una forma genérica de wavelet cosenoidal con ventana es:
+
+$$
+\psi_k(t)=
+A_k\,w_k(t)\cos[\omega_k(t-t_k)+\phi_k]
+$$
+
+$$
+\omega_k=\frac{2\pi}{T_k}
+$$
+
+donde $w_k(t)$ es una ventana compacta o cuasi compacta. Por ejemplo, una ventana tipo coseno puede escribirse como:
+
+$$
+w_k(t)=
+\frac{1}{2}
+\left[
+1+\cos\left(
+\frac{2\pi(t-t_k)}{L_k}
+\right)
+\right],
+\qquad
+|t-t_k|\le \frac{L_k}{2}
+$$
+
+$$
+w_k(t)=0,
+\qquad
+|t-t_k|> \frac{L_k}{2}
+$$
+
+$$
+L_k=N_{c,k}T_k
+$$
+
+La amplitud efectiva queda absorbida por $c_k$, por lo que puede tomarse $A_k=1$ en la construcción de la matriz de sensibilidad.
+
+En implementaciones tipo Abrahamson/Hancock/Al Atik, las wavelets no se escogen arbitrariamente: se diseñan para que su efecto sea localizado en tiempo y frecuencia, y para que no introduzcan deriva en velocidad y desplazamiento.
+
+### 20.10.6. Condiciones para evitar deriva en velocidad y desplazamiento
+
+Si se añade una corrección $\Delta a(t)=c\psi(t)$, la variación residual de velocidad al final del registro es:
+
+$$
+\Delta v(T)=c\int_0^T \psi(t)dt
+$$
+
+Para que no haya velocidad residual:
+
+$$
+\int_0^T \psi(t)dt=0
+$$
+
+La variación residual de desplazamiento es:
+
+$$
+\Delta u(T)=c\int_0^T (T-t)\psi(t)dt
+$$
+
+Para que no haya desplazamiento residual:
+
+$$
+\int_0^T (T-t)\psi(t)dt=0
+$$
+
+Si la wavelet está completamente contenida dentro del registro, estas condiciones se satisfacen de forma robusta imponiendo momento cero y primer momento cero:
+
+$$
+\int \psi(t)dt=0
+$$
+
+$$
+\int t\psi(t)dt=0
+$$
+
+Por esta razón, las wavelets modernas de ajuste espectral se formulan para no producir offset neto de velocidad ni desplazamiento. Si se usan wavelets que no cumplen estas condiciones, el registro ajustado puede calzar el espectro pero quedar inutilizable en velocidad y desplazamiento.
+
+### 20.10.7. Ubicación temporal de las wavelets
+
+Para cada periodo $T_j$, la wavelet asociada se coloca cerca del tiempo donde el oscilador alcanza su máxima respuesta:
+
+$$
+t_j^*=\arg\max_t |q_j(t)|
+$$
+
+Esto preserva la no estacionariedad: si el contenido que controla $T_j$ ocurre durante la fase fuerte, la corrección se aplica allí, no de forma uniforme en todo el registro.
+
+Si $t_j^*$ está muy cerca del inicio o fin del registro, la wavelet puede quedar truncada. En ese caso se puede:
+
+- aplicar padding dinámico al inicio o final;
+- desplazar la wavelet dentro de una ventana permitida;
+- reducir el número de ciclos;
+- limitar el ajuste en ese periodo;
+- rechazar el registro si requiere una corrección no física.
+
+### 20.10.8. Acoplamiento entre periodos
+
+Una wavelet diseñada para corregir $T_k$ también afecta otros periodos $T_j$. Esto aparece en los términos fuera de la diagonal de la matriz:
+
+$$
+B_{jk}, \qquad j\ne k
+$$
+
+Si se ignorara el acoplamiento, se usaría sólo:
+
+$$
+c_j\approx \frac{e_j}{B_{jj}}
+$$
+
+pero esto puede deteriorar el ajuste en periodos vecinos. Por eso los métodos robustos resuelven el sistema matricial completo. Algunas implementaciones reducen artificialmente los términos fuera de la diagonal:
+
+$$
+B_{jk}^{mod}=
+\begin{cases}
+B_{jk}, & j=k\\
+\rho B_{jk}, & j\ne k
+\end{cases}
+$$
+
+con $0<\rho\le1$. Reducir demasiado $\rho$ puede mejorar convergencia local pero dañar velocidad y desplazamiento o aumentar la modificación artificial.
+
+### 20.10.9. Ajuste simultáneo para varios amortiguamientos
+
+Si se quiere que el registro coincida con espectros objetivo para varios amortiguamientos $\xi_l$, cada par $(T_j,\xi_l)$ genera una ecuación:
+
+$$
+e_{jl}=
+\ln\left[
+\frac{S_{a,\text{obj}}(T_j,\xi_l)}
+{S_{a,m}(T_j,\xi_l)}
+\right]
+$$
+
+La matriz se ensambla apilando filas:
+
+$$
+\mathbf e=
+\begin{bmatrix}
+e_{11}\\
+e_{21}\\
+\vdots\\
+e_{N_T,1}\\
+e_{12}\\
+\vdots\\
+e_{N_T,N_\xi}
+\end{bmatrix}
+$$
+
+$$
+B_{(j,l),k}
+=
+\frac{1}{S_{a,jl}}
+s_{jl}q_{jlk}^{\psi}(t_{jl}^*)
+$$
+
+Esto permite ajustar simultáneamente a 5 %, 7 %, 10 % u otros amortiguamientos, pero aumenta el condicionamiento del sistema y puede requerir más regularización.
+
+### 20.10.10. Ajuste a pseudoaceleración, desplazamiento o aceleración absoluta
+
+El mismo marco sirve para varias ordenadas.
+
+#### Ajuste a desplazamiento relativo
+
+$$
+q_j(t)=u_j(t)
+$$
+
+$$
+S_{d,j}=\max_t |u_j(t)|
+$$
+
+$$
+A_{jk}=s_j u_{jk}^{\psi}(t_j^*)
+$$
+
+#### Ajuste a pseudoaceleración
+
+$$
+q_j(t)=\omega_j^2u_j(t)
+$$
+
+$$
+S_{a,j}=\max_t |\omega_j^2u_j(t)|
+$$
+
+$$
+A_{jk}=s_j\omega_j^2u_{jk}^{\psi}(t_j^*)
+$$
+
+#### Ajuste a aceleración absoluta
+
+$$
+q_j(t)=\ddot u_j(t)+a_m(t)
+$$
+
+La respuesta de una wavelet es:
+
+$$
+q_{jk}^{\psi}(t)=\ddot u_{jk}^{\psi}(t)+\psi_k(t)
+$$
+
+$$
+A_{jk}=s_jq_{jk}^{\psi}(t_j^*)
+$$
+
+La elección debe ser coherente con el espectro objetivo. En ingeniería sísmica de estructuras se usa con frecuencia pseudoaceleración a 5 % de amortiguamiento, pero en algunos contextos se exige aceleración absoluta o desplazamiento.
+
+### 20.10.11. Método CWT para generar registros compatibles
+
+En la familia CWT, no se añaden wavelets una por una en los tiempos de máxima respuesta SDOF. En cambio, se descompone la señal completa en el dominio tiempo-escala.
+
+La transformada wavelet continua de $a(t)$ es:
+
+$$
+W_a(s,p)=
+\frac{1}{\sqrt{s}}
+\int_{-\infty}^{\infty}
+a(t)
+\psi^*
+\left(
+\frac{t-p}{s}
+\right)
+dt
+$$
+
+donde:
+
+- $s$ es la escala;
+- $p$ es el desplazamiento temporal;
+- $\psi$ es la wavelet madre;
+- $^*$ denota conjugado complejo.
+
+La escala se asocia a una frecuencia pseudo-Fourier:
+
+$$
+f_s=\frac{f_c}{s\Delta t}
+$$
+
+o, en forma conceptual:
+
+$$
+T_s\propto s
+$$
+
+donde $f_c$ depende de la wavelet madre.
+
+La reconstrucción aproximada puede escribirse como suma de funciones de detalle:
+
+$$
+a(t)\approx \sum_{j=1}^{N_s}D_j(t)
+$$
+
+donde $D_j(t)$ contiene el contenido de la señal asociado a la escala $s_j$ o frecuencia $f_j$.
+
+En una iteración $r$:
+
+$$
+R_j^{(r)}
+=
+\frac{S_{a,\text{obj}}(T_j)}
+{S_{a}^{(r)}(T_j)}
+$$
+
+Se modifica cada detalle:
+
+$$
+\tilde D_j^{(r)}(t)
+=
+M_j^{(r)}D_j^{(r)}(t)
+$$
+
+con un modificador relajado, por ejemplo:
+
+$$
+M_j^{(r)}
+=
+\exp\left[
+\eta
+\ln R_j^{(r)}
+\right]
+=
+\left(R_j^{(r)}\right)^\eta
+$$
+
+donde $0<\eta\le1$. Luego se reconstruye:
+
+$$
+a^{(r+1)}(t)=
+\sum_{j=1}^{N_s}
+\tilde D_j^{(r)}(t)
+$$
+
+y se repite hasta que el espectro coincida con la tolerancia.
+
+Esta formulación modifica el contenido tiempo-frecuencia completo de la señal. Es potente, pero debe controlarse porque puede alterar la distribución energética del registro.
+
+### 20.10.12. Comparación entre ajuste wavelet en tiempo y CWT
+
+| Aspecto | Wavelets en dominio del tiempo | CWT |
+|---|---|---|
+| Variable modificada | Se suman wavelets $\psi_k(t)$ al acelerograma | Se modifican coeficientes o detalles $D_j(t)$ |
+| Relación con SDOF | Directa mediante matriz de sensibilidad | Indirecta mediante ratios espectrales e iteración |
+| Localización temporal | Cerca del tiempo de máxima respuesta $t_j^*$ | Distribuida según coeficientes tiempo-escala |
+| Control de drift | Depende de la wavelet elegida; las modernas imponen momentos cero | Debe verificarse tras reconstrucción |
+| Costo computacional | Matriz de sensibilidad y SVD | CWT/reconstrucción, acelerable por FFT |
+| Riesgo | Sobreajuste local, mala condición | Alterar distribución tiempo-frecuencia |
+| Uso típico | RspMatch, SeismoMatch, ajuste a espectros objetivo | Generación de registros compatibles, control tiempo-frecuencia |
+
+### 20.10.13. Procedimiento práctico recomendado para usar wavelets
+
+#### Paso 1: elegir registro semilla
+
+El registro debe ser físicamente compatible con:
+
+- magnitud;
+- distancia;
+- mecanismo;
+- sitio;
+- duración;
+- pulso o ausencia de pulso;
+- forma espectral aproximada;
+- calidad de procesamiento.
+
+#### Paso 2: aplicar escala lineal inicial
+
+Calcular:
+
+$$
+\alpha=
+\exp\left[
+\frac{\sum_j w_j\ln(S_{a,\text{obj}}(T_j)/S_{a,0}(T_j))}
+{\sum_j w_j}
+\right]
+$$
+
+Usar:
+
+$$
+a^{(0)}(t)=\alpha a_0(t)
+$$
+
+#### Paso 3: definir el rango de matching
+
+$$
+T_{\min}\le T_j\le T_{\max}
+$$
+
+El rango debe cubrir:
+
+- periodos de modos relevantes;
+- elongación de periodo por daño;
+- periodos importantes del perfil geotécnico;
+- rango normativo exigido.
+
+No debe extenderse innecesariamente, porque un rango excesivo obliga al algoritmo a modificar demasiado el registro.
+
+#### Paso 4: calcular respuesta SDOF
+
+Para cada $T_j$:
+
+$$
+u_j(t),\quad q_j(t),\quad S_{a,j},\quad t_j^*
+$$
+
+#### Paso 5: construir wavelets
+
+Para cada periodo o grupo de periodos:
+
+$$
+\psi_k(t)=\psi(t;t_k,T_k,N_{c,k})
+$$
+
+con:
+
+$$
+t_k\approx t_j^*
+$$
+
+$$
+T_k\approx T_j
+$$
+
+#### Paso 6: ensamblar matriz de sensibilidad
+
+$$
+B_{jk}=
+\frac{s_jq_{jk}^{\psi}(t_j^*)}{S_{a,j}}
+$$
+
+#### Paso 7: resolver coeficientes
+
+$$
+\mathbf c=(\mathbf B^T\mathbf W\mathbf B+\lambda^2\mathbf I)^{-1}
+\mathbf B^T\mathbf W\mathbf e
+$$
+
+#### Paso 8: actualizar acelerograma
+
+$$
+a^{(r+1)}(t)=a^{(r)}(t)+\gamma\sum_k c_k\psi_k(t)
+$$
+
+#### Paso 9: verificar y repetir
+
+Recalcular:
+
+$$
+S_a(T_j),\quad v(t),\quad u(t),\quad I_A,\quad D_{5-95},\quad CAV
+$$
+
+Iterar hasta cumplir tolerancia o hasta detectar modificación excesiva.
+
+### 20.10.14. Tolerancias y métricas de aceptación
+
+El ajuste espectral por wavelets no debe aceptarse sólo porque el espectro calza. Deben revisarse:
+
+#### Error espectral máximo
+
+$$
+E_{\max}=
+\max_j
+\left|
+\frac{S_{a,m}(T_j)-S_{a,\text{obj}}(T_j)}
+{S_{a,\text{obj}}(T_j)}
+\right|
+$$
+
+#### Error espectral RMS logarítmico
+
+$$
+E_{\ln,RMS}=
+\sqrt{
+\frac{1}{N_T}
+\sum_j
+\left[
+\ln\left(
+\frac{S_{a,m}(T_j)}
+{S_{a,\text{obj}}(T_j)}
+\right)
+\right]^2
+}
+$$
+
+#### Magnitud relativa de la modificación
+
+$$
+R_{\Delta a}=
+\sqrt{
+\frac{\int_0^T [a_m(t)-\alpha a_0(t)]^2dt}
+{\int_0^T [\alpha a_0(t)]^2dt}
+}
+$$
+
+#### Cambio en intensidad de Arias
+
+$$
+R_{I_A}=\frac{I_{A,m}}{I_{A,\alpha}}
+$$
+
+#### Cambio en duración significativa
+
+$$
+R_D=\frac{D_{5-95,m}}{D_{5-95,\alpha}}
+$$
+
+#### Cambio en velocidad y desplazamiento pico
+
+$$
+R_{PGV}=\frac{PGV_m}{PGV_{\alpha}}
+$$
+
+$$
+R_{PGD}=\frac{PGD_m}{PGD_{\alpha}}
+$$
+
+Si estos ratios son extremos, el ajuste puede ser espectralmente correcto pero físicamente deficiente.
+
+### 20.10.15. Relación con intensidad de Arias y duración
+
+Para escalamiento lineal:
+
+$$
+I_{A,\alpha}=\alpha^2 I_{A,0}
+$$
+
+Para ajuste wavelet:
+
+$$
+I_{A,m}
+=
+\frac{\pi}{2g}
+\int_0^T
+\left[
+\alpha a_0(t)+\sum_k c_k\psi_k(t)
+\right]^2dt
+$$
+
+Expandiendo:
+
+$$
+I_{A,m}
+=
+\frac{\pi}{2g}
+\left[
+\alpha^2\int a_0^2(t)dt
++
+2\alpha\sum_k c_k\int a_0(t)\psi_k(t)dt
++
+\sum_k\sum_l c_kc_l\int \psi_k(t)\psi_l(t)dt
+\right]
+$$
+
+Por tanto, el método wavelet puede aumentar o disminuir Arias según la correlación entre la señal original y las wavelets añadidas. También puede cambiar la curva de Husid:
+
+$$
+H_m(t)=\frac{I_{A,m}(t)}{I_{A,m}(T)}
+$$
+
+y por tanto:
+
+$$
+D_{5-95,m}=t_{95,m}-t_{5,m}
+$$
+
+Aunque el objetivo sea sólo espectral, $I_A$ y $D_{5-95}$ deben verificarse siempre, especialmente en análisis geotécnicos no lineales, licuación, deformación permanente, degradación cíclica y presas.
+
+### 20.10.16. Relación con respuesta inelástica
+
+El ajuste wavelet se calibra normalmente con espectro elástico. Sin embargo, la demanda inelástica depende de la historia temporal, no sólo de $S_a(T)$.
+
+Para un SDOF inelástico:
+
+$$
+m\ddot u+c\dot u+f_s(u,z)=-m a_m(t)
+$$
+
+La diferencia de demanda entre el registro escalado y el ajustado es:
+
+$$
+\Delta \mu
+=
+\frac{u_{\max,m}}{u_y}
+-
+\frac{u_{\max,\alpha}}{u_y}
+$$
+
+No existe garantía de que:
+
+$$
+S_{a,m}(T)=S_{a,\text{obj}}(T)
+$$
+
+implique:
+
+$$
+\mu_m=\mu_{\text{obj}}
+$$
+
+Por eso, para análisis no lineal debe compararse:
+
+- ductilidad máxima;
+- energía histerética;
+- ciclos equivalentes;
+- desplazamiento residual estructural;
+- daño acumulado;
+- sensibilidad a orientación y componentes.
+
+### 20.10.17. Uso de wavelets en registros near-fault
+
+Los registros near-fault pueden contener pulsos de velocidad y desplazamiento permanente. En ellos, el ajuste wavelet puede ser peligroso si:
+
+- corrige periodos largos añadiendo oscilaciones no físicas;
+- destruye el pulso de velocidad;
+- elimina o altera fling-step;
+- induce drift en desplazamiento;
+- desplaza energía hacia tiempos incompatibles con la ruptura.
+
+Para estos casos:
+
+1. seleccionar registros pulse-like si el escenario lo requiere;
+2. limitar el rango de matching para no distorsionar el pulso;
+3. revisar velocidad, desplazamiento y orientación fault-normal/fault-parallel;
+4. evitar imponer desplazamiento final cero si existe desplazamiento permanente físico;
+5. comparar $PGV$, $PGD$, $I_A$, $D_{5-95}$ y espectro de desplazamiento antes/después.
+
+### 20.10.18. Señales de que el ajuste wavelet no es aceptable
+
+Rechazar o revisar el registro si:
+
+- requiere muchas iteraciones;
+- necesita coeficientes $c_k$ grandes;
+- cambia mucho $I_A$, $PGV$, $PGD$ o duración;
+- introduce drift en velocidad o desplazamiento;
+- produce oscilaciones visibles antes del arribo;
+- modifica severamente el pulso principal;
+- requiere un rango de matching excesivo;
+- falla la convergencia en periodos clave;
+- el espectro calza, pero la FAS o la distribución temporal de energía son irreales.
+
+### 20.10.19. Pseudocódigo del ajuste wavelet en el dominio del tiempo
+
+```text
+entrada:
+    a0(t)              acelerograma corregido
+    Sa_obj(Tj)         espectro objetivo
+    Tj                 periodos de matching
+    xi                 amortiguamiento
+    tol                tolerancia
+    max_iter           iteraciones maximas
+
+preproceso:
+    calcular Sa0(Tj)
+    calcular factor alfa
+    a = alfa * a0
+
+para r = 1 hasta max_iter:
+
+    para cada periodo Tj:
+        resolver SDOF con entrada a(t)
+        qj(t) = omega_j^2 uj(t)
+        Sa_j = max |qj(t)|
+        tj = argmax |qj(t)|
+        sj = sign(qj(tj))
+        error ej = ln(Sa_obj_j / Sa_j)
+
+    si max(abs(exp(ej)-1)) <= tol:
+        terminar
+
+    construir wavelets psi_k(t) centradas en tk aproximadamente igual a tj
+
+    para cada j,k:
+        resolver respuesta del oscilador j ante psi_k(t)
+        qjk_psi(t) = omega_j^2 ujk_psi(t)
+        B[j,k] = sj * qjk_psi(tj) / Sa_j
+
+    resolver:
+        c = inv(B' W B + lambda^2 I) B' W e
+
+    actualizar:
+        a(t) = a(t) + gamma * suma_k c_k psi_k(t)
+
+    verificar velocidad, desplazamiento y modificacion energetica
+
+salida:
+    a_m(t), v_m(t), u_m(t), Sa_m(Tj), reporte de errores
+```
+
+### 20.10.20. Pseudocódigo del método CWT
+
+```text
+entrada:
+    a0(t), Sa_obj(Tj), escalas sj relacionadas con Tj
+
+preproceso:
+    a = alfa * a0
+
+para r = 1 hasta max_iter:
+
+    calcular CWT:
+        W_a(s,p)
+
+    reconstruir detalles:
+        D_j(t) para cada escala s_j
+
+    calcular Sa_actual(Tj)
+
+    para cada j:
+        R_j = Sa_obj(Tj) / Sa_actual(Tj)
+        M_j = R_j^eta
+
+    modificar detalles:
+        D_j_mod(t) = M_j * D_j(t)
+
+    reconstruir:
+        a(t) = suma_j D_j_mod(t)
+
+    verificar espectro, velocidad, desplazamiento, Arias y duracion
+
+salida:
+    acelerograma compatible
+```
+
+### 20.10.21. Conclusión técnica sobre wavelets
+
+El método wavelet no es un simple “escalamiento”; es un **ajuste espectral no estacionario**. El escalamiento lineal multiplica toda la señal por $\alpha$, mientras que el ajuste wavelet añade o redistribuye contenido en tiempos y frecuencias específicas. Su potencia está en lograr compatibilidad espectral con menor alteración que una señal sintética genérica, pero su riesgo está en generar una señal que calza el espectro y pierde realismo físico.
+
+La aceptación del registro ajustado debe basarse en cuatro niveles:
+
+1. **Compatibilidad espectral:** error dentro de tolerancia.
+2. **Compatibilidad cinemática:** sin drift artificial en velocidad y desplazamiento.
+3. **Compatibilidad energética:** Arias, CAV y duración no distorsionadas injustificadamente.
+4. **Compatibilidad sismológica/geotécnica:** magnitud, distancia, sitio, pulso, contenido de frecuencias y duración coherentes con el escenario.
+
+
+---
+
 ## 21. Escalamiento basado en respuesta inelástica
 
 ### 21.1. Idea
@@ -2068,7 +3035,7 @@ El filtrado high-pass y el ajuste espectral pueden destruir estos rasgos. Para e
 - Fase:
 - Software/código:
 
-### 27.3. Parámetros ouputantes
+### 27.3. Parámetros resultantes
 
 - PGA:
 - PGV:
@@ -2210,7 +3177,7 @@ $$
 5. **Escalar no equivale a seleccionar.** Primero se elige un registro físicamente compatible; luego se escala.
 6. **Spectrum matching requiere control adicional.** Un espectro perfecto puede esconder una señal físicamente degradada.
 7. **La suite importa más que un registro aislado.** Para diseño o evaluación, controlar media, dispersión y diversidad.
-8. **Documentar todo.** Sin parámetros de procesamiento, el ouputado no es auditable.
+8. **Documentar todo.** Sin parámetros de procesamiento, el resultado no es auditable.
 
 ---
 
@@ -2245,6 +3212,14 @@ $$
 [R14] Newmark, N. M. (1959). *A method of computation for structural dynamics*. Journal of the Engineering Mechanics Division, ASCE.
 
 [R15] COSMOS / Center for Engineering Strong Motion Data. Manuales y documentación de registros corregidos/no corregidos y espectros. Portal: https://www.strongmotioncenter.org/
+
+
+[R16] Montejo, L. A., & Suarez, L. E. (2013). *An improved CWT-based algorithm for the generation of spectrum-compatible records*. International Journal of Advanced Structural Engineering, 5, 26. DOI: 10.1186/2008-6695-5-26.
+
+[R17] Abrahamson, N. A. (1992). *Non-stationary spectral matching*. Seismological Research Letters, 63(1), 30.
+
+[R18] RSPMatch09 / RSPMatch2005 technical documentation. Time-domain spectral matching by adding adjustment wavelets to seed acceleration time series.
+
 
 ---
 

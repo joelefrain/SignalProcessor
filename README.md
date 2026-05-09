@@ -1,4 +1,4 @@
-# SismoSignal
+# SignalProcessor
 
 Proyecto Python para correccion de acelerogramas, filtrado de ruido, calculo de parametros/espectros y escalamiento sismico. Esta implementado con `numpy`/`scipy` y usa `numba` cuando esta disponible para acelerar el calculo de espectros SDOF por Newmark.
 
@@ -22,9 +22,9 @@ Los casos de uso viven como notebooks en `notebooks/`:
 Tambien se puede usar la CLI:
 
 ```powershell
-sismosignal process --config examples/config/process_lima.toml
-sismosignal scale --config examples/config/scale_lima.toml
-sismosignal suite --config examples/config/suite_scaling.toml
+signalprocessor process --config examples/config/process_lima.toml
+signalprocessor scale --config examples/config/scale_lima.toml
+signalprocessor suite --config examples/config/suite_scaling.toml
 ```
 
 Si Windows no tiene la carpeta de scripts de Python en el `PATH`, usa la forma equivalente:

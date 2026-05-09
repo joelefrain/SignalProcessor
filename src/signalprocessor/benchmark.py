@@ -10,9 +10,17 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from signalprocessor.io import read_motion_csv, read_spectrum_csv, write_motion_csv, write_spectrum_csv
+from signalprocessor.io import (
+    read_motion_csv,
+    read_spectrum_csv,
+    write_motion_csv,
+    write_spectrum_csv,
+)
 from signalprocessor.motion import Motion
-from signalprocessor.scaling import frequency_domain_spectral_match, scale_motion_to_target
+from signalprocessor.scaling import (
+    frequency_domain_spectral_match,
+    scale_motion_to_target,
+)
 from signalprocessor.spectra import response_spectrum, significant_duration
 
 
@@ -113,7 +121,12 @@ def read_seismomatch_txt(path: str | Path, *, unit: str = "g") -> Motion:
     if not rows:
         raise ValueError(f"No numeric time series found in {path}")
     data = np.asarray(rows, dtype=np.float64)
-    return Motion.from_arrays(data[:, 0], data[:, 1], unit=unit, name=header_name or path.stem.replace("..", ""))
+    return Motion.from_arrays(
+        data[:, 0],
+        data[:, 1],
+        unit=unit,
+        name=header_name or path.stem.replace("..", ""),
+    )
 
 
 def discover_benchmark_pairs(
@@ -123,15 +136,25 @@ def discover_benchmark_pairs(
     benchmark_dir: str | Path | None = None,
 ) -> list[tuple[str, Path, Path]]:
     root = Path(root).resolve()
-    motions = Path(motion_dir).resolve() if motion_dir is not None else resolve_motion_dir(root)
-    benchmarks = Path(benchmark_dir).resolve() if benchmark_dir is not None else resolve_benchmark_dir(root)
+    motions = (
+        Path(motion_dir).resolve()
+        if motion_dir is not None
+        else resolve_motion_dir(root)
+    )
+    benchmarks = (
+        Path(benchmark_dir).resolve()
+        if benchmark_dir is not None
+        else resolve_benchmark_dir(root)
+    )
     pairs: list[tuple[str, Path, Path]] = []
     for benchmark_path in sorted(benchmarks.glob("*.txt")):
         benchmark_motion = read_seismomatch_txt(benchmark_path)
         name = benchmark_motion.name
         motion_path = motions / f"{name}.csv"
         if not motion_path.exists():
-            raise FileNotFoundError(f"Benchmark {benchmark_path.name} maps to missing motion file {motion_path}")
+            raise FileNotFoundError(
+                f"Benchmark {benchmark_path.name} maps to missing motion file {motion_path}"
+            )
         pairs.append((name, motion_path, benchmark_path))
     return pairs
 
@@ -147,9 +170,9 @@ def _period_mask(periods: Array, period_range: tuple[float, float] | None) -> Ar
 
 
 def _relative_error(values: Array, reference: Array) -> Array:
-    return np.abs(np.asarray(values, dtype=np.float64) - np.asarray(reference, dtype=np.float64)) / np.maximum(
-        np.abs(reference), 1e-12
-    )
+    return np.abs(
+        np.asarray(values, dtype=np.float64) - np.asarray(reference, dtype=np.float64)
+    ) / np.maximum(np.abs(reference), 1e-12)
 
 
 def _time_series_nrmse(ours: Motion, reference: Motion) -> float:
@@ -223,7 +246,11 @@ def run_seismomatch_benchmark(
     iterations: int = 3,
 ) -> BenchmarkRun:
     root = Path(root).resolve()
-    target_path = Path(response_spectrum_path).resolve() if response_spectrum_path else resolve_response_spectrum_path(root)
+    target_path = (
+        Path(response_spectrum_path).resolve()
+        if response_spectrum_path
+        else resolve_response_spectrum_path(root)
+    )
     target_periods, target_sa_g = read_spectrum_csv(target_path)
     mask = _period_mask(target_periods, period_range)
     period_min = float(target_periods[mask][0])
@@ -231,7 +258,9 @@ def run_seismomatch_benchmark(
     records: list[BenchmarkRecord] = []
     spectra: dict[str, dict[str, Array]] = {}
 
-    for name, motion_path, benchmark_path in discover_benchmark_pairs(root, motion_dir=motion_dir, benchmark_dir=benchmark_dir):
+    for name, motion_path, benchmark_path in discover_benchmark_pairs(
+        root, motion_dir=motion_dir, benchmark_dir=benchmark_dir
+    ):
         raw_motion = read_motion_csv(motion_path, unit="g", name=name)
         seismomatch_motion = read_seismomatch_txt(benchmark_path)
         scaled = _scale_raw_motion(
@@ -245,13 +274,33 @@ def run_seismomatch_benchmark(
         )
 
         # Calculate response spectra with high resolution
-        ours_spectrum = response_spectrum(scaled.motion, None, damping=damping, beta=beta, gamma=gamma, num_periods=num_periods)
-        seismomatch_spectrum = response_spectrum(seismomatch_motion, None, damping=damping, beta=beta, gamma=gamma, num_periods=num_periods)
-        
+        ours_spectrum = response_spectrum(
+            scaled.motion,
+            None,
+            damping=damping,
+            beta=beta,
+            gamma=gamma,
+            num_periods=num_periods,
+        )
+        seismomatch_spectrum = response_spectrum(
+            seismomatch_motion,
+            None,
+            damping=damping,
+            beta=beta,
+            gamma=gamma,
+            num_periods=num_periods,
+        )
+
         # Interpolate to target periods for comparison
-        ours_sa_g = np.interp(target_periods, ours_spectrum["period_s"], ours_spectrum["sa_g"])
-        seismomatch_sa_g = np.interp(target_periods, seismomatch_spectrum["period_s"], seismomatch_spectrum["sa_g"])
-        
+        ours_sa_g = np.interp(
+            target_periods, ours_spectrum["period_s"], ours_spectrum["sa_g"]
+        )
+        seismomatch_sa_g = np.interp(
+            target_periods,
+            seismomatch_spectrum["period_s"],
+            seismomatch_spectrum["sa_g"],
+        )
+
         rel = _relative_error(ours_sa_g, seismomatch_sa_g)
         target_rel_ours = _relative_error(ours_sa_g, target_sa_g)
         target_rel_seismomatch = _relative_error(seismomatch_sa_g, target_sa_g)
@@ -259,20 +308,22 @@ def run_seismomatch_benchmark(
         max_rel = float(np.max(rel[mask]))
         mean_rel = float(np.mean(rel[mask]))
         rms_rel = float(np.sqrt(np.mean(rel[mask] ** 2)))
-        
+
         # Calculate significant durations
         duration_raw = significant_duration(raw_motion)
         duration_ours = significant_duration(scaled.motion)
         duration_seismomatch = significant_duration(seismomatch_motion)
-        
+
         # Calculate duration variation percentage
         # Use geometric mean of the two scaled motions as reference
         mean_duration = (duration_ours + duration_seismomatch) / 2.0
         if mean_duration > 0:
-            duration_variation = abs(duration_ours - duration_seismomatch) / mean_duration * 100.0
+            duration_variation = (
+                abs(duration_ours - duration_seismomatch) / mean_duration * 100.0
+            )
         else:
             duration_variation = 0.0
-        
+
         provisional = BenchmarkRecord(
             name=name,
             method=method,
@@ -315,22 +366,40 @@ def run_seismomatch_benchmark(
             "seismomatch_motion": seismomatch_motion,
         }
 
-    return BenchmarkRun(records=records, spectra=spectra, target_periods=target_periods, target_sa_g=target_sa_g)
+    return BenchmarkRun(
+        records=records,
+        spectra=spectra,
+        target_periods=target_periods,
+        target_sa_g=target_sa_g,
+    )
 
 
 def write_benchmark_report(run: BenchmarkRun, output_dir: str | Path) -> None:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     rows = run.rows()
-    (output_dir / "summary.json").write_text(json.dumps(rows, indent=2, sort_keys=True), encoding="utf-8")
+    (output_dir / "summary.json").write_text(
+        json.dumps(rows, indent=2, sort_keys=True), encoding="utf-8"
+    )
     if rows:
         with (output_dir / "summary.csv").open("w", newline="", encoding="utf-8") as fh:
             writer = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
             writer.writeheader()
             writer.writerows(rows)
-    with (output_dir / "spectra_long.csv").open("w", newline="", encoding="utf-8") as fh:
+    with (output_dir / "spectra_long.csv").open(
+        "w", newline="", encoding="utf-8"
+    ) as fh:
         writer = csv.writer(fh)
-        writer.writerow(["record", "period_s", "target_sa_g", "ours_sa_g", "seismomatch_sa_g", "relative_error"])
+        writer.writerow(
+            [
+                "record",
+                "period_s",
+                "target_sa_g",
+                "ours_sa_g",
+                "seismomatch_sa_g",
+                "relative_error",
+            ]
+        )
         for name, spec in run.spectra.items():
             for row in zip(
                 spec["period_s"],
@@ -365,12 +434,22 @@ def write_scaled_benchmark_motions(
             damping=0.05,
             iterations=3,
         )
-        write_motion_csv(output_dir / f"{record.name}_{record.method}.csv", scaled.motion, unit="g")
-        
+        write_motion_csv(
+            output_dir / f"{record.name}_{record.method}.csv", scaled.motion, unit="g"
+        )
+
         # Calculate spectrum with high resolution
-        scaled_spectrum = response_spectrum(scaled.motion, None, beta=beta, gamma=gamma, num_periods=num_periods)
-        spectrum_sa_g = np.interp(target_periods, scaled_spectrum["period_s"], scaled_spectrum["sa_g"])
-        write_spectrum_csv(output_dir / f"{record.name}_{record.method}_spectrum.csv", target_periods, spectrum_sa_g)
+        scaled_spectrum = response_spectrum(
+            scaled.motion, None, beta=beta, gamma=gamma, num_periods=num_periods
+        )
+        spectrum_sa_g = np.interp(
+            target_periods, scaled_spectrum["period_s"], scaled_spectrum["sa_g"]
+        )
+        write_spectrum_csv(
+            output_dir / f"{record.name}_{record.method}_spectrum.csv",
+            target_periods,
+            spectrum_sa_g,
+        )
 
 
 def plot_benchmark_spectra(run: BenchmarkRun, output_dir: str | Path) -> None:
@@ -380,45 +459,70 @@ def plot_benchmark_spectra(run: BenchmarkRun, output_dir: str | Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     for record in run.records:
         spec = run.spectra[record.name]
-        
+
         # Create figure with two subplots
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5), constrained_layout=True)
-        
+
         # Left subplot: Response spectra
-        ax1.loglog(spec["period_s"], spec["target_sa_g"], label="Objetivo", linewidth=1.5)
-        ax1.loglog(spec["period_s"], spec["seismomatch_sa_g"], label="SeismoMatch", linewidth=1.5)
-        ax1.loglog(spec["period_s"], spec["ours_sa_g"], label="SignalProcessor", linewidth=1.5)
-        ax1.axvspan(record.period_min_s, record.period_max_s, color="0.8", alpha=0.25, label="Rango comparado")
+        ax1.loglog(
+            spec["period_s"], spec["target_sa_g"], label="Objetivo", linewidth=1.5
+        )
+        ax1.loglog(
+            spec["period_s"],
+            spec["seismomatch_sa_g"],
+            label="SeismoMatch",
+            linewidth=1.5,
+        )
+        ax1.loglog(
+            spec["period_s"], spec["ours_sa_g"], label="SignalProcessor", linewidth=1.5
+        )
+        ax1.axvspan(
+            record.period_min_s,
+            record.period_max_s,
+            color="0.8",
+            alpha=0.25,
+            label="Rango comparado",
+        )
         ax1.set_xlabel("T (s)")
         ax1.set_ylabel("Sa (g)")
         ax1.set_title(f"Espectros de Respuesta - {record.name}")
         ax1.grid(True, which="both", alpha=0.25)
         ax1.legend()
-        
+
         # Right subplot: Time series with original motion
         raw_motion = spec["raw_motion"]
         scaled_motion = spec["scaled_motion"]
         seismomatch_motion = spec["seismomatch_motion"]
-        
+
         time_raw = raw_motion.time
         time_scaled = scaled_motion.time
         time_seismo = seismomatch_motion.time
-        
+
         accel_raw = raw_motion.accel_as("g")
         accel_scaled = scaled_motion.accel_as("g")
         accel_seismo = seismomatch_motion.accel_as("g")
-        
+
         ax2.plot(time_raw, accel_raw, label="Original", linewidth=0.8, alpha=0.7)
-        ax2.plot(time_scaled, accel_scaled, label="SignalProcessor", linewidth=0.8, alpha=0.8)
-        ax2.plot(time_seismo, accel_seismo, label="SeismoMatch", linewidth=0.8, alpha=0.8)
+        ax2.plot(
+            time_scaled, accel_scaled, label="SignalProcessor", linewidth=0.8, alpha=0.8
+        )
+        ax2.plot(
+            time_seismo, accel_seismo, label="SeismoMatch", linewidth=0.8, alpha=0.8
+        )
         ax2.set_xlabel("Tiempo (s)")
         ax2.set_ylabel("Aceleración (g)")
-        ax2.set_title(f"Series Temporales - {record.name}\nDuración Sig.: Original={record.duration_raw_s:.2f}s, SP={record.duration_ours_s:.2f}s, SM={record.duration_seismomatch_s:.2f}s (Var={record.duration_variation_pct:.1f}%)")
+        ax2.set_title(
+            f"Series Temporales - {record.name}\nDuración Sig.: Original={record.duration_raw_s:.2f}s, SP={record.duration_ours_s:.2f}s, SM={record.duration_seismomatch_s:.2f}s (Var={record.duration_variation_pct:.1f}%)"
+        )
         ax2.grid(True, alpha=0.25)
         ax2.legend()
-        
+
         # Overall title with metric
-        fig.suptitle(f"{record.name}: {record.comparison_metric}={_comparison_value(record):.3f}", fontsize=12, fontweight='bold')
-        
+        fig.suptitle(
+            f"{record.name}: {record.comparison_metric}={_comparison_value(record):.3f}",
+            fontsize=12,
+            fontweight="bold",
+        )
+
         fig.savefig(output_dir / f"{record.name}_spectra.png", dpi=160)
         plt.close(fig)

@@ -6,7 +6,6 @@ from typing import Iterable
 import numpy as np
 from numpy.typing import NDArray
 
-from .baseline import correct_baseline
 from .filtering import butterworth_filter
 from .motion import Motion
 from .spectra import response_spectrum
@@ -41,7 +40,9 @@ def interpolate_spectrum(
     return np.interp(target_periods, source_periods, source_sa_g)
 
 
-def _period_mask(periods: NDArray[np.float64], period_range: tuple[float, float] | None) -> NDArray[np.bool_]:
+def _period_mask(
+    periods: NDArray[np.float64], period_range: tuple[float, float] | None
+) -> NDArray[np.bool_]:
     if period_range is None:
         return np.ones(periods.size, dtype=bool)
     lo, hi = period_range
@@ -210,7 +211,9 @@ def frequency_domain_spectral_match(
         )
         amp_factor[0] = 1.0
         shaped = np.fft.irfft(fft * amp_factor, n=current.npts)
-        current = current.with_accel(shaped - np.mean(shaped), name=f"{motion.name}_matched")
+        current = current.with_accel(
+            shaped - np.mean(shaped), name=f"{motion.name}_matched"
+        )
         if highpass_hz or lowpass_hz:
             current = butterworth_filter(
                 current,
@@ -223,7 +226,13 @@ def frequency_domain_spectral_match(
             ).motion
 
     final_spec = response_spectrum(current, target_periods, damping=damping)
-    rms_ratio = np.exp(np.mean(np.log(np.maximum(target_sa_g, 1e-12) / np.maximum(final_spec["sa_g"], 1e-12))))
+    rms_ratio = np.exp(
+        np.mean(
+            np.log(
+                np.maximum(target_sa_g, 1e-12) / np.maximum(final_spec["sa_g"], 1e-12)
+            )
+        )
+    )
     total_factor *= float(rms_ratio)
     current = current.scaled(total_factor, name=f"{motion.name}_matched")
     final_sa = final_spec["sa_g"] * total_factor

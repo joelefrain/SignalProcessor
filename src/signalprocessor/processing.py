@@ -41,19 +41,39 @@ class ProcessConfig:
         if windows is not None:
             windows = [(float(start), float(end)) for start, end in windows]
         return cls(
-            baseline_method=baseline.get("method", data.get("baseline_method", cls.baseline_method)),
-            baseline_order=int(baseline.get("order", data.get("baseline_order", cls.baseline_order))),
+            baseline_method=baseline.get(
+                "method", data.get("baseline_method", cls.baseline_method)
+            ),
+            baseline_order=int(
+                baseline.get("order", data.get("baseline_order", cls.baseline_order))
+            ),
             baseline_pre_event_end=baseline.get("pre_event_end_s"),
             baseline_windows=windows,
-            enforce_zero_end=bool(baseline.get("enforce_zero_end", data.get("enforce_zero_end", True))),
-            highpass_hz=filt.get("highpass_hz", data.get("highpass_hz", cls.highpass_hz)),
+            enforce_zero_end=bool(
+                baseline.get("enforce_zero_end", data.get("enforce_zero_end", True))
+            ),
+            highpass_hz=filt.get(
+                "highpass_hz", data.get("highpass_hz", cls.highpass_hz)
+            ),
             lowpass_hz=filt.get("lowpass_hz", data.get("lowpass_hz", cls.lowpass_hz)),
-            filter_order=int(filt.get("order", data.get("filter_order", cls.filter_order))),
+            filter_order=int(
+                filt.get("order", data.get("filter_order", cls.filter_order))
+            ),
             zero_phase=bool(filt.get("zero_phase", data.get("zero_phase", True))),
-            taper_fraction=float(filt.get("taper_fraction", data.get("taper_fraction", cls.taper_fraction))),
-            pad_seconds=float(filt.get("pad_seconds", data.get("pad_seconds", cls.pad_seconds))),
-            spectrum_min_period=float(spectrum.get("min_period_s", cls.spectrum_min_period)),
-            spectrum_max_period=float(spectrum.get("max_period_s", cls.spectrum_max_period)),
+            taper_fraction=float(
+                filt.get(
+                    "taper_fraction", data.get("taper_fraction", cls.taper_fraction)
+                )
+            ),
+            pad_seconds=float(
+                filt.get("pad_seconds", data.get("pad_seconds", cls.pad_seconds))
+            ),
+            spectrum_min_period=float(
+                spectrum.get("min_period_s", cls.spectrum_min_period)
+            ),
+            spectrum_max_period=float(
+                spectrum.get("max_period_s", cls.spectrum_max_period)
+            ),
             spectrum_points=int(spectrum.get("points", cls.spectrum_points)),
             damping=float(spectrum.get("damping", cls.damping)),
         )
@@ -71,8 +91,14 @@ class Processouput:
     config: ProcessConfig
 
 
-def process_motion(motion: Motion, config: ProcessConfig | dict[str, Any] | None = None) -> Processouput:
-    cfg = config if isinstance(config, ProcessConfig) else ProcessConfig.from_dict(config or {})
+def process_motion(
+    motion: Motion, config: ProcessConfig | dict[str, Any] | None = None
+) -> Processouput:
+    cfg = (
+        config
+        if isinstance(config, ProcessConfig)
+        else ProcessConfig.from_dict(config or {})
+    )
     baseline = correct_baseline(
         motion,
         method=cfg.baseline_method,
@@ -92,9 +118,13 @@ def process_motion(motion: Motion, config: ProcessConfig | dict[str, Any] | None
     )
     velocity, displacement = integrate_motion(filtered.motion)
     metrics = motion_metrics(filtered.motion)
-    periods = logspace_periods(cfg.spectrum_min_period, cfg.spectrum_max_period, cfg.spectrum_points)
+    periods = logspace_periods(
+        cfg.spectrum_min_period, cfg.spectrum_max_period, cfg.spectrum_points
+    )
     spectrum = response_spectrum(filtered.motion, periods, damping=cfg.damping)
-    return Processouput(motion, baseline, filtered, velocity, displacement, metrics, spectrum, cfg)
+    return Processouput(
+        motion, baseline, filtered, velocity, displacement, metrics, spectrum, cfg
+    )
 
 
 def period_grid_from_config(data: dict[str, Any]) -> np.ndarray:

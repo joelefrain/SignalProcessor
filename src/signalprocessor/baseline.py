@@ -31,7 +31,9 @@ def polynomial_design(tau: NDArray[np.float64], order: int) -> NDArray[np.float6
     return np.vander(tau, N=order + 1, increasing=True)
 
 
-def _window_mask(time: NDArray[np.float64], windows: list[tuple[float, float]] | None) -> NDArray[np.bool_]:
+def _window_mask(
+    time: NDArray[np.float64], windows: list[tuple[float, float]] | None
+) -> NDArray[np.bool_]:
     if not windows:
         return np.ones(time.size, dtype=bool)
     mask = np.zeros(time.size, dtype=bool)
@@ -140,7 +142,9 @@ def correct_baseline(
         baseline = np.full_like(motion.accel, coeff)
         coeffs = np.array([coeff], dtype=np.float64)
     elif method_norm in {"final_velocity", "velocity_final"}:
-        coeff = float(np.trapz(motion.accel, motion.time - motion.time[0]) / motion.duration)
+        coeff = float(
+            np.trapz(motion.accel, motion.time - motion.time[0]) / motion.duration
+        )
         baseline = np.full_like(motion.accel, coeff)
         coeffs = np.array([coeff], dtype=np.float64)
     elif method_norm in {"polynomial", "poly", "least_squares"}:
@@ -154,7 +158,9 @@ def correct_baseline(
             )
             info["constraint"] = "vT,uT"
         else:
-            baseline, coeffs = fit_polynomial_baseline(motion, order=order, windows=windows)
+            baseline, coeffs = fit_polynomial_baseline(
+                motion, order=order, windows=windows
+            )
     else:
         raise ValueError(f"Unsupported baseline method: {method}")
 

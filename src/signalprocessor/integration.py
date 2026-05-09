@@ -6,7 +6,9 @@ from numpy.typing import NDArray
 from .motion import Motion
 
 
-def cumulative_trapezoid_uniform(y: NDArray[np.float64], dt: float, initial: float = 0.0) -> NDArray[np.float64]:
+def cumulative_trapezoid_uniform(
+    y: NDArray[np.float64], dt: float, initial: float = 0.0
+) -> NDArray[np.float64]:
     y = np.asarray(y, dtype=np.float64)
     out = np.empty_like(y)
     out[0] = float(initial)
