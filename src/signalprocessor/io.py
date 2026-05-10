@@ -16,7 +16,9 @@ def _floats(line: str) -> list[float]:
     return [float(match.group(0)) for match in FLOAT_RE.finditer(line)]
 
 
-def _read_two_column(path: Path, *, units: str, metadata: dict | None = None) -> MotionRecord:
+def _read_two_column(
+    path: Path, *, units: str, metadata: dict | None = None
+) -> MotionRecord:
     data = np.genfromtxt(path, delimiter=",", comments="#")
     if data.ndim == 1:
         data = np.genfromtxt(path, delimiter=None, comments="#")
@@ -25,7 +27,9 @@ def _read_two_column(path: Path, *, units: str, metadata: dict | None = None) ->
     meta = {"source": str(path)}
     if metadata:
         meta.update(metadata)
-    return MotionRecord(time=data[:, 0], acceleration=data[:, 1], units=units, metadata=meta)
+    return MotionRecord(
+        time=data[:, 0], acceleration=data[:, 1], units=units, metadata=meta
+    )
 
 
 def read_motion_csv(path: str | Path, *, units: str = "g") -> MotionRecord:
@@ -64,7 +68,9 @@ def _infer_smc_dt(header_lines: Iterable[str]) -> float:
     for line in header_lines:
         header_values.extend(_floats(line))
 
-    common_sps = np.asarray([20.0, 25.0, 40.0, 50.0, 100.0, 200.0, 500.0], dtype=np.float64)
+    common_sps = np.asarray(
+        [20.0, 25.0, 40.0, 50.0, 100.0, 200.0, 500.0], dtype=np.float64
+    )
     best_sps = None
     best_err = np.inf
     for value in header_values:
@@ -133,7 +139,9 @@ def read_motion(path: str | Path, *, units: str | None = None) -> MotionRecord:
     raise ValueError(f"Unsupported motion file extension: {file_path.suffix}")
 
 
-def read_target_spectrum(path: str | Path, *, units: str = "g", damping: float = 0.05) -> Spectrum:
+def read_target_spectrum(
+    path: str | Path, *, units: str = "g", damping: float = 0.05
+) -> Spectrum:
     file_path = Path(path)
     data = np.genfromtxt(file_path, delimiter=",", comments="#")
     if data.ndim == 1:
@@ -149,7 +157,9 @@ def read_target_spectrum(path: str | Path, *, units: str = "g", damping: float =
     )
 
 
-def write_motion_csv(record: MotionRecord, path: str | Path, *, units: str | None = None) -> Path:
+def write_motion_csv(
+    record: MotionRecord, path: str | Path, *, units: str | None = None
+) -> Path:
     file_path = Path(path)
     out_record = record.as_units(units) if units else record
     file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -158,7 +168,9 @@ def write_motion_csv(record: MotionRecord, path: str | Path, *, units: str | Non
     return file_path
 
 
-def write_seismomatch_txt(record: MotionRecord, path: str | Path, *, name: str | None = None) -> Path:
+def write_seismomatch_txt(
+    record: MotionRecord, path: str | Path, *, name: str | None = None
+) -> Path:
     file_path = Path(path)
     file_path.parent.mkdir(parents=True, exist_ok=True)
     rec = record.as_units("g")

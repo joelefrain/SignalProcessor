@@ -26,8 +26,12 @@ class GroundMotionParameters:
     final_displacement: float
 
 
-def integrate_motion(acceleration_si: np.ndarray, dt: float) -> tuple[np.ndarray, np.ndarray]:
-    velocity = trapezoid_integrate(np.asarray(acceleration_si, dtype=np.float64), float(dt), 0.0)
+def integrate_motion(
+    acceleration_si: np.ndarray, dt: float
+) -> tuple[np.ndarray, np.ndarray]:
+    velocity = trapezoid_integrate(
+        np.asarray(acceleration_si, dtype=np.float64), float(dt), 0.0
+    )
     displacement = trapezoid_integrate(velocity, float(dt), 0.0)
     return velocity, displacement
 
@@ -39,7 +43,9 @@ def cumulative_arias(acceleration_si: np.ndarray, dt: float) -> np.ndarray:
     return (np.pi / (2.0 * G0)) * integral
 
 
-def _time_at_fraction(time: np.ndarray, cumulative: np.ndarray, fraction: float) -> float:
+def _time_at_fraction(
+    time: np.ndarray, cumulative: np.ndarray, fraction: float
+) -> float:
     total = float(cumulative[-1])
     if total <= 0.0:
         return float(time[0])
@@ -57,11 +63,17 @@ def _time_at_fraction(time: np.ndarray, cumulative: np.ndarray, fraction: float)
     return float(time[idx - 1] + alpha * (time[idx] - time[idx - 1]))
 
 
-def significant_duration(time: np.ndarray, arias_curve: np.ndarray, start: float, end: float) -> float:
-    return _time_at_fraction(time, arias_curve, end) - _time_at_fraction(time, arias_curve, start)
+def significant_duration(
+    time: np.ndarray, arias_curve: np.ndarray, start: float, end: float
+) -> float:
+    return _time_at_fraction(time, arias_curve, end) - _time_at_fraction(
+        time, arias_curve, start
+    )
 
 
-def bracketed_duration(acceleration_si: np.ndarray, dt: float, threshold_g: float = 0.05) -> float:
+def bracketed_duration(
+    acceleration_si: np.ndarray, dt: float, threshold_g: float = 0.05
+) -> float:
     mask = np.abs(acceleration_si) >= threshold_g * G0
     if not np.any(mask):
         return 0.0
@@ -119,7 +131,11 @@ def compute_ground_motion_parameters_from_series(
         _check_same_length(acc, vel, "velocity_si")
 
     if displacement_si is None:
-        disp = integrated_displacement if velocity_si is None else trapezoid_integrate(vel, dt, 0.0)
+        disp = (
+            integrated_displacement
+            if velocity_si is None
+            else trapezoid_integrate(vel, dt, 0.0)
+        )
     else:
         disp = _as_1d_float(displacement_si, "displacement_si")
         _check_same_length(acc, disp, "displacement_si")
@@ -144,7 +160,9 @@ def compute_ground_motion_parameters_from_series(
     )
 
 
-def compute_ground_motion_parameters(record: MotionRecord, *, threshold_g: float = 0.05) -> GroundMotionParameters:
+def compute_ground_motion_parameters(
+    record: MotionRecord, *, threshold_g: float = 0.05
+) -> GroundMotionParameters:
     return compute_ground_motion_parameters_from_series(
         record.time,
         record.acceleration_si(),
@@ -195,11 +213,15 @@ def ground_motion_parameters_to_dict(
 
     row = asdict(params)
     row["pga"] = float(acceleration_from_si(params.pga, acc_unit))
-    row["rms_acceleration"] = float(acceleration_from_si(params.rms_acceleration, acc_unit))
+    row["rms_acceleration"] = float(
+        acceleration_from_si(params.rms_acceleration, acc_unit)
+    )
     row["pgv"] = float(_velocity_from_si(params.pgv, vel_unit))
     row["final_velocity"] = float(_velocity_from_si(params.final_velocity, vel_unit))
     row["pgd"] = float(_displacement_from_si(params.pgd, disp_unit))
-    row["final_displacement"] = float(_displacement_from_si(params.final_displacement, disp_unit))
+    row["final_displacement"] = float(
+        _displacement_from_si(params.final_displacement, disp_unit)
+    )
     row["cav"] = float(_velocity_from_si(params.cav, cav_unit))
 
     if not suffix_units:
@@ -213,7 +235,9 @@ def ground_motion_parameters_to_dict(
         "d5_75_s": row["d5_75"],
         "d5_95_s": row["d5_95"],
         f"cav_{cav_unit.replace('/', '_')}": row["cav"],
-        f"rms_acceleration_{acc_unit.replace('/', '_').replace('^', '')}": row["rms_acceleration"],
+        f"rms_acceleration_{acc_unit.replace('/', '_').replace('^', '')}": row[
+            "rms_acceleration"
+        ],
         "bracketed_duration_s": row["bracketed_duration"],
         f"final_velocity_{vel_unit.replace('/', '_')}": row["final_velocity"],
         f"final_displacement_{disp_unit}": row["final_displacement"],

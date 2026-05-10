@@ -63,6 +63,28 @@ manual_config = CorrectionConfig(
 result_manual = correct_record(record, manual_config)
 ```
 
+Los coeficientes de linea base tambien pueden entregarse explicitamente. Se interpretan como un polinomio de aceleracion en SI, ordenado `c0, c1, c2, ...`, evaluado sobre `tau` normalizado entre 0 y 1:
+
+```python
+manual_config = CorrectionConfig(
+    remove_mean=True,
+    baseline_coefficients=(0.012, -0.004),          # c0 + c1*tau, m/s2
+    highpass_hz=0.02,
+    lowpass_hz=25.0,
+    filter_type="butterworth",
+    post_filter_baseline_coefficients=(0.001, -0.001),
+)
+result_manual = correct_record(record, manual_config)
+```
+
+Cuando `baseline_coefficients` o `post_filter_baseline_coefficients` se entregan, esos coeficientes sustituyen el ajuste automatico del polinomio correspondiente. En ese caso las restricciones de velocidad/desplazamiento final no se reestiman para ese tramo, porque el usuario ya definio la linea base. El recomendador sigue estimando coeficientes para cada candidato y los expone en `recommendation.to_rows()` y en `recommendation.best.result.diagnostics`.
+
+Desde CLI, los coeficientes se entregan separados por comas:
+
+```powershell
+.\.venv\Scripts\python.exe -m signalprocessor.cli correct examples/data/benchmark/uncorrected_motion/CCSP.HNN.._u.smc examples/output/CCSP.HNN.manual.csv --baseline-coefficients "0.012,-0.004" --post-filter-baseline-coefficients "0.001,-0.001" --highpass 0.02 --lowpass 25 --filter-type butterworth
+```
+
 Espectro de respuesta:
 
 ```powershell
@@ -92,7 +114,7 @@ Ajuste espectral iterativo:
 
 - `records.py`: dataclasses `MotionRecord` y `Spectrum`.
 - `io.py`: lectores CSV, SeismoMatch TXT y COSMOS/SMC.
-- `processing.py`: baseline polinomial con restricciones discretas de velocidad/desplazamiento, despiking, taper, filtros IIR Butterworth/Chebyshev I/Chebyshev II/eliptico/Bessel y pipeline de correccion.
+- `processing.py`: baseline polinomial estimado o entregado explicitamente por coeficientes, restricciones discretas de velocidad/desplazamiento, despiking, taper, filtros IIR Butterworth/Chebyshev I/Chebyshev II/eliptico/Bessel y pipeline de correccion.
 - `metrics.py`: PGA, PGV, PGD, Arias, duraciones, CAV y RMS. Internamente las metricas se almacenan en SI; use `ground_motion_parameters_to_dict(...)` para tablas en cm/s2, cm/s y cm.
 - `spectra.py`: espectros elasticos con Newmark promedio aceleracion.
 - `scaling.py`: escalamiento lineal logaritmico y misfit espectral.
@@ -132,6 +154,7 @@ Correccion de drift:
 - `post_filter_baseline_order=1` con `post_filter_constrain_final_displacement=True` aplica una correccion polinomial posterior al filtrado para remover drift terminal introducido por taper/filtro antes de integrar a velocidad y desplazamiento.
 - El recomendador evalua por defecto todas las familias de filtro disponibles (`butterworth`, `cheby1`, `cheby2`, `ellip`, `bessel`) y permite restringir el barrido con `filter_types` o `--filter-types`.
 - Cuando detecta drift medio/alto agrega candidatos con polinomio post-filtro.
+- El ranking de recomendacion muestra los coeficientes estimados de baseline pre-filtro y post-filtro en m/s2 para que el usuario pueda copiarlos como parametros manuales si requiere reproducibilidad exacta.
 
 Benchmarks actuales:
 

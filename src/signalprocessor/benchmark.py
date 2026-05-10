@@ -45,7 +45,12 @@ def compare_correction_to_usgs(
     scale = max(float(np.max(np.abs(ref))), np.finfo(float).eps)
     rms = float(np.sqrt(np.mean((got - ref) ** 2)) / scale)
     pga_ratio = float(np.max(np.abs(got)) / scale)
-    return BenchmarkRow(name=Path(str(uncorrected_path)).stem, pga_ratio=pga_ratio, rms_acc_error=rms, notes=notes)
+    return BenchmarkRow(
+        name=Path(str(uncorrected_path)).stem,
+        pga_ratio=pga_ratio,
+        rms_acc_error=rms,
+        notes=notes,
+    )
 
 
 def batch_usgs_benchmark(root: str | Path) -> pd.DataFrame:
@@ -74,13 +79,19 @@ def compare_scaling_to_seismomatch(
         match = match_spectrum(
             record,
             target,
-            MatchingConfig(max_iterations=15, relaxation=0.35, t_min=t_min, t_max=t_max),
+            MatchingConfig(
+                max_iterations=15, relaxation=0.35, t_min=t_min, t_max=t_max
+            ),
         )
         scaled_record = match.record
         scaled_spectrum = match.spectrum
         factor = float("nan")
-        max_abs_error = spectral_misfit(scaled_spectrum, target, t_min=t_min, t_max=t_max)["max_abs_error"]
-        rms_log_error = spectral_misfit(scaled_spectrum, target, t_min=t_min, t_max=t_max)["rms_log_error"]
+        max_abs_error = spectral_misfit(
+            scaled_spectrum, target, t_min=t_min, t_max=t_max
+        )["max_abs_error"]
+        rms_log_error = spectral_misfit(
+            scaled_spectrum, target, t_min=t_min, t_max=t_max
+        )["rms_log_error"]
         method = "matched"
     else:
         result = linear_scale(record, target, t_min=t_min, t_max=t_max)
@@ -99,12 +110,16 @@ def compare_scaling_to_seismomatch(
     }
     if seismomatch_path is not None and Path(seismomatch_path).exists():
         sm = read_motion(seismomatch_path)
-        spec_sm = response_spectrum(sm, target.periods, output_units=target.units, damping=target.damping)
+        spec_sm = response_spectrum(
+            sm, target.periods, output_units=target.units, damping=target.damping
+        )
         misfit_sm = spectral_misfit(spec_sm, target, t_min=t_min, t_max=t_max)
         ours = scaled_record.as_units("g")
         n = min(ours.npts, sm.npts)
         row["seismomatch_rms_log_error"] = misfit_sm["rms_log_error"]
-        row["time_series_rms_vs_seismomatch"] = float(np.sqrt(np.mean((ours.acceleration[:n] - sm.acceleration[:n]) ** 2)))
+        row["time_series_rms_vs_seismomatch"] = float(
+            np.sqrt(np.mean((ours.acceleration[:n] - sm.acceleration[:n]) ** 2))
+        )
     return row
 
 

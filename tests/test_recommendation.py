@@ -49,16 +49,21 @@ def test_recommendation_returns_stable_ranked_result():
 
 def test_usgs_hnn_recommendation_rejects_long_period_displacement_drift():
     root = Path(__file__).resolve().parents[1]
-    record = read_motion(root / "examples/data/benchmark/uncorrected_motion/CCSP.HNN.._u.smc")
+    record = read_motion(
+        root / "examples/data/benchmark/uncorrected_motion/CCSP.HNN.._u.smc"
+    )
 
     recommendation = recommend_correction_method(record, t_min=0.05, t_max=3.0)
-    no_filter = next(candidate for candidate in recommendation.candidates if candidate.name == "baseline_2_sin_filtro")
+    no_filter = next(
+        candidate
+        for candidate in recommendation.candidates
+        if candidate.name == "baseline_2_sin_filtro"
+    )
 
     assert recommendation.best.config.highpass_hz is not None
     assert recommendation.best.pgd_pgv_seconds < 1.0
     assert recommendation.best.pgd_pgv_seconds < 0.25 * no_filter.pgd_pgv_seconds
     assert recommendation.best.result.metrics.pgd < 0.50
-
 
 
 def test_default_recommendation_uses_all_supported_filter_families():
@@ -80,7 +85,9 @@ def test_user_filter_types_restrict_recommendation_candidates():
     drift = 0.008 + 0.00015 * time
     rec = MotionRecord(time=time, acceleration=pulse + drift, units="m/s^2")
 
-    recommendation = recommend_correction_method(rec, t_min=0.05, t_max=2.0, filter_types="bessel, chebyshev2")
+    recommendation = recommend_correction_method(
+        rec, t_min=0.05, t_max=2.0, filter_types="bessel, chebyshev2"
+    )
     filtered_families = {
         candidate.config.filter_type
         for candidate in recommendation.candidates
@@ -92,8 +99,13 @@ def test_user_filter_types_restrict_recommendation_candidates():
 
 
 def test_filter_type_normalization_handles_aliases_and_all():
-    assert normalize_recommendation_filter_types("todas") == DEFAULT_RECOMMENDATION_FILTER_TYPES
-    assert normalize_recommendation_filter_types(["Butter", "Chevyshev", "elliptic", "Butter"]) == (
+    assert (
+        normalize_recommendation_filter_types("todas")
+        == DEFAULT_RECOMMENDATION_FILTER_TYPES
+    )
+    assert normalize_recommendation_filter_types(
+        ["Butter", "Chevyshev", "elliptic", "Butter"]
+    ) == (
         "butterworth",
         "cheby1",
         "ellip",
@@ -103,10 +115,71 @@ def test_filter_type_normalization_handles_aliases_and_all():
 def test_build_candidates_can_override_filter_types_on_existing_parameters():
     dt = 0.01
     time = np.arange(0.0, 10.0, dt)
-    rec = MotionRecord(time=time, acceleration=np.sin(2.0 * np.pi * time), units="m/s^2")
+    rec = MotionRecord(
+        time=time, acceleration=np.sin(2.0 * np.pi * time), units="m/s^2"
+    )
     params = recommend_correction_parameters(rec)
 
-    candidates = build_correction_candidates(rec, parameters=params, filter_types=["ellip"])
-    filtered_families = {candidate.config.filter_type for candidate in candidates if candidate.config.highpass_hz is not None}
+    candidates = build_correction_candidates(
+        rec, parameters=params, filter_types=["ellip"]
+    )
+    filtered_families = {
+        candidate.config.filter_type
+        for candidate in candidates
+        if candidate.config.highpass_hz is not None
+    }
 
     assert filtered_families == {"ellip"}
+
+
+def test_recommendation_rows_show_baseline_coefficients():
+    dt = 0.01
+    time = np.arange(0.0, 12.0, dt)
+    pulse = 0.20 * np.sin(2.0 * np.pi * 1.1 * time) * np.exp(-0.05 * time)
+    drift = 0.01 + 0.0001 * time
+    rec = MotionRecord(time=time, acceleration=pulse + drift, units="m/s^2")
+
+    recommendation = recommend_correction_method(
+        rec, t_min=0.05, t_max=1.5, filter_types="butterworth"
+    )
+    row = recommendation.to_rows()[0]
+
+    assert "baseline_coefficients_mps2" in row
+    assert row["baseline_coefficients_mps2"]
+    assert "Coeficientes recomendados de baseline pre-filtro" in "\n".join(
+        recommendation.decision_notes
+    )
+
+
+def test_recommended_coefficients_can_reproduce_best_candidate_explicitly():
+    from dataclasses import replace
+    from signalprocessor.processing import correct_record
+
+    dt = 0.01
+    time = np.arange(0.0, 12.0, dt)
+    pulse = 0.20 * np.sin(2.0 * np.pi * 1.1 * time) * np.exp(-0.05 * time)
+    drift = 0.01 + 0.0001 * time
+    rec = MotionRecord(time=time, acceleration=pulse + drift, units="m/s^2")
+
+    recommendation = recommend_correction_method(
+        rec, t_min=0.05, t_max=1.5, filter_types="butterworth"
+    )
+    best = recommendation.best
+    pre_coeffs = tuple(
+        float(v) for v in best.result.diagnostics["pre_filter_baseline_coefficients"]
+    )
+    post_values = best.result.diagnostics.get("post_filter_baseline_coefficients")
+    post_coeffs = None if post_values is None else tuple(float(v) for v in post_values)
+    explicit_config = replace(
+        best.config,
+        baseline_coefficients=pre_coeffs,
+        post_filter_baseline_coefficients=post_coeffs,
+    )
+
+    explicit_result = correct_record(rec, explicit_config)
+
+    np.testing.assert_allclose(
+        explicit_result.record.acceleration_si(), best.result.record.acceleration_si()
+    )
+    np.testing.assert_allclose(explicit_result.velocity, best.result.velocity)
+    np.testing.assert_allclose(explicit_result.displacement, best.result.displacement)

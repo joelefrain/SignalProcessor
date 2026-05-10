@@ -20,7 +20,9 @@ def test_read_motion_csv_example():
 
 def test_linear_scale_against_target_runs():
     rec = read_motion(ROOT / "examples" / "data" / "motion" / "ATICOEW.csv")
-    target = read_target_spectrum(ROOT / "examples" / "data" / "response_spectrum" / "EPU_475.csv")
+    target = read_target_spectrum(
+        ROOT / "examples" / "data" / "response_spectrum" / "EPU_475.csv"
+    )
     result = linear_scale(rec, target, t_min=0.2, t_max=2.0)
     assert result.factor > 0.0
     assert result.scaled_spectrum.sa.shape == target.sa.shape

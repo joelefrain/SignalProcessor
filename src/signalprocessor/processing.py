@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, Sequence
 
 import numpy as np
 from scipy import signal
 
 from .core import central_difference
-from .metrics import GroundMotionParameters, compute_ground_motion_parameters, integrate_motion
+from .metrics import (
+    GroundMotionParameters,
+    compute_ground_motion_parameters,
+    integrate_motion,
+)
 from .records import MotionRecord
 
 FilterType = Literal[
@@ -33,6 +37,7 @@ class CorrectionConfig:
     constrain_final_displacement: bool = False
     target_final_velocity: float = 0.0
     target_final_displacement: float = 0.0
+    baseline_coefficients: tuple[float, ...] | None = None
     despike: bool = True
     spike_sigma: float = 8.0
     taper_fraction: float = 0.02
@@ -45,6 +50,7 @@ class CorrectionConfig:
     bessel_norm: str = "phase"
     zero_phase: bool = True
     post_filter_baseline_order: int | None = None
+    post_filter_baseline_coefficients: tuple[float, ...] | None = None
     post_filter_constrain_final_velocity: bool = True
     post_filter_constrain_final_displacement: bool = False
 
@@ -60,7 +66,9 @@ class CorrectionResult:
     diagnostics: dict[str, Any] = field(default_factory=dict)
 
 
-def remove_mean(acc: np.ndarray, dt: float, seconds: float | None = None) -> tuple[np.ndarray, float]:
+def remove_mean(
+    acc: np.ndarray, dt: float, seconds: float | None = None
+) -> tuple[np.ndarray, float]:
     n = acc.size if seconds is None else max(1, min(acc.size, int(round(seconds / dt))))
     offset = float(np.mean(acc[:n]))
     return acc - offset, offset
@@ -83,6 +91,50 @@ def _constraint_rows(design: np.ndarray, dt: float) -> tuple[np.ndarray, np.ndar
         velocity_row[i] = velocity[-1]
         displacement_row[i] = displacement[-1]
     return velocity_row, displacement_row
+
+
+def coerce_polynomial_coefficients(
+    coefficients: Sequence[float] | np.ndarray | None,
+) -> np.ndarray | None:
+    """Return validated polynomial coefficients or ``None``.
+
+    Coefficients are ordered as ``c0, c1, c2, ...`` and are evaluated on the
+    normalized time coordinate ``tau`` in ``[0, 1]``. The units are acceleration
+    units of the processing pipeline, i.e. SI ``m/s^2`` when used by
+    ``correct_record``.
+    """
+
+    if coefficients is None:
+        return None
+    arr = np.asarray(tuple(coefficients), dtype=np.float64)
+    if arr.ndim != 1 or arr.size == 0:
+        raise ValueError(
+            "baseline coefficients must be a non-empty one-dimensional sequence"
+        )
+    if not np.all(np.isfinite(arr)):
+        raise ValueError("baseline coefficients must be finite")
+    return arr
+
+
+def evaluate_polynomial_baseline(
+    npts: int, coefficients: Sequence[float] | np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Evaluate a user-defined acceleration-domain polynomial baseline.
+
+    The polynomial convention is ``baseline(tau) = c0 + c1*tau + c2*tau^2 + ...``
+    with ``tau`` linearly normalized from 0 to 1 over the whole record. This is
+    the same convention used by ``polynomial_baseline`` when it estimates the
+    coefficients automatically.
+    """
+
+    coeffs = coerce_polynomial_coefficients(coefficients)
+    if coeffs is None:  # pragma: no cover - guarded by caller
+        raise ValueError("coefficients are required")
+    if npts < 2:
+        raise ValueError("npts must be at least 2")
+    tau = np.linspace(0.0, 1.0, int(npts), dtype=np.float64)
+    design = np.vander(tau, N=coeffs.size, increasing=True)
+    return design @ coeffs, coeffs
 
 
 def polynomial_baseline(
@@ -109,7 +161,9 @@ def polynomial_baseline(
     if order < 0:
         return np.zeros_like(acc), np.zeros(0, dtype=np.float64)
     if acc.ndim != 1 or acc.size < 2:
-        raise ValueError("acceleration must be a one-dimensional array with at least two samples")
+        raise ValueError(
+            "acceleration must be a one-dimensional array with at least two samples"
+        )
 
     order = int(order)
     tau = np.linspace(0.0, 1.0, acc.size, dtype=np.float64)
@@ -141,7 +195,9 @@ def polynomial_baseline(
             # least squares instead of silently ignoring the requested targets.
             weight = max(np.linalg.norm(lhs, ord=2), 1.0) * 1.0e6
             augmented_lhs = np.vstack([design, np.sqrt(weight) * cmat])
-            augmented_rhs = np.concatenate([acc, np.sqrt(weight) * np.asarray(targets, dtype=np.float64)])
+            augmented_rhs = np.concatenate(
+                [acc, np.sqrt(weight) * np.asarray(targets, dtype=np.float64)]
+            )
             coeffs = np.linalg.lstsq(augmented_lhs, augmented_rhs, rcond=None)[0]
     else:
         coeffs = np.linalg.lstsq(design, acc, rcond=None)[0]
@@ -150,7 +206,9 @@ def polynomial_baseline(
     return baseline, coeffs
 
 
-def despike_array(acceleration: np.ndarray, dt: float, *, sigma: float = 8.0) -> tuple[np.ndarray, np.ndarray]:
+def despike_array(
+    acceleration: np.ndarray, dt: float, *, sigma: float = 8.0
+) -> tuple[np.ndarray, np.ndarray]:
     acc = np.asarray(acceleration, dtype=np.float64).copy()
     deriv = central_difference(acc, float(dt))
     med = float(np.median(deriv))
@@ -203,7 +261,9 @@ def _normalized_filter_type(filter_type: str) -> str:
         return aliases[key]
     except KeyError as exc:
         valid = ", ".join(sorted(set(aliases.values())))
-        raise ValueError(f"Unsupported filter_type={filter_type!r}. Valid filter families: {valid}") from exc
+        raise ValueError(
+            f"Unsupported filter_type={filter_type!r}. Valid filter families: {valid}"
+        ) from exc
 
 
 def _filter_band(
@@ -220,14 +280,30 @@ def _filter_band(
     if hp is not None:
         hp = min(float(hp), 0.95 * nyq)
     if hp is None and lp is None:
-        return None, None, {"fs": fs, "nyquist": nyq, "highpass_hz": None, "lowpass_hz": None}
+        return (
+            None,
+            None,
+            {"fs": fs, "nyquist": nyq, "highpass_hz": None, "lowpass_hz": None},
+        )
     if hp is not None and lp is not None and hp >= lp:
         raise ValueError("highpass_hz must be lower than lowpass_hz")
     if hp is not None and lp is not None:
-        return [hp, lp], "bandpass", {"fs": fs, "nyquist": nyq, "highpass_hz": hp, "lowpass_hz": lp}
+        return (
+            [hp, lp],
+            "bandpass",
+            {"fs": fs, "nyquist": nyq, "highpass_hz": hp, "lowpass_hz": lp},
+        )
     if hp is not None:
-        return hp, "highpass", {"fs": fs, "nyquist": nyq, "highpass_hz": hp, "lowpass_hz": None}
-    return lp, "lowpass", {"fs": fs, "nyquist": nyq, "highpass_hz": None, "lowpass_hz": lp}
+        return (
+            hp,
+            "highpass",
+            {"fs": fs, "nyquist": nyq, "highpass_hz": hp, "lowpass_hz": None},
+        )
+    return (
+        lp,
+        "lowpass",
+        {"fs": fs, "nyquist": nyq, "highpass_hz": None, "lowpass_hz": lp},
+    )
 
 
 def design_iir_filter(
@@ -260,7 +336,9 @@ def design_iir_filter(
 
     fs = float(meta["fs"])
     if family == "butterworth":
-        sos = signal.iirfilter(order, wn, btype=btype, ftype="butter", fs=fs, output="sos")
+        sos = signal.iirfilter(
+            order, wn, btype=btype, ftype="butter", fs=fs, output="sos"
+        )
     elif family == "cheby1":
         sos = signal.iirfilter(
             order,
@@ -297,7 +375,9 @@ def design_iir_filter(
         meta["filter_ripple_db"] = float(ripple_db)
         meta["filter_attenuation_db"] = float(attenuation_db)
     elif family == "bessel":
-        sos = signal.bessel(order, wn, btype=btype, fs=fs, output="sos", norm=bessel_norm)
+        sos = signal.bessel(
+            order, wn, btype=btype, fs=fs, output="sos", norm=bessel_norm
+        )
         meta["bessel_norm"] = bessel_norm
     else:  # pragma: no cover - guarded by _normalized_filter_type
         raise ValueError(f"Unsupported filter family: {family}")
@@ -357,7 +437,9 @@ def butterworth_filter(
     return filtered
 
 
-def correct_record(record: MotionRecord, config: CorrectionConfig | None = None) -> CorrectionResult:
+def correct_record(
+    record: MotionRecord, config: CorrectionConfig | None = None
+) -> CorrectionResult:
     cfg = config or CorrectionConfig()
     acc = record.acceleration_si().astype(np.float64, copy=True)
     dt = record.dt
@@ -372,16 +454,28 @@ def correct_record(record: MotionRecord, config: CorrectionConfig | None = None)
         acc, offset = remove_mean(acc, dt, cfg.pre_event_seconds)
         diagnostics["mean_removed_mps2"] = offset
 
-    constrain_disp = cfg.constrain_final_displacement and cfg.baseline_order >= 1
-    baseline, coeffs = polynomial_baseline(
-        acc,
-        dt,
-        cfg.baseline_order,
-        constrain_velocity=cfg.constrain_final_velocity,
-        constrain_displacement=constrain_disp,
-        target_final_velocity=cfg.target_final_velocity,
-        target_final_displacement=cfg.target_final_displacement,
-    )
+    user_coeffs = coerce_polynomial_coefficients(cfg.baseline_coefficients)
+    if user_coeffs is not None:
+        baseline, coeffs = evaluate_polynomial_baseline(acc.size, user_coeffs)
+        diagnostics["pre_filter_baseline_source"] = "user_coefficients"
+        diagnostics["pre_filter_baseline_order"] = int(coeffs.size - 1)
+        if cfg.constrain_final_velocity or cfg.constrain_final_displacement:
+            diagnostics["pre_filter_constraint_note"] = (
+                "terminal constraints are not re-estimated when explicit baseline_coefficients are supplied"
+            )
+    else:
+        constrain_disp = cfg.constrain_final_displacement and cfg.baseline_order >= 1
+        baseline, coeffs = polynomial_baseline(
+            acc,
+            dt,
+            cfg.baseline_order,
+            constrain_velocity=cfg.constrain_final_velocity,
+            constrain_displacement=constrain_disp,
+            target_final_velocity=cfg.target_final_velocity,
+            target_final_displacement=cfg.target_final_displacement,
+        )
+        diagnostics["pre_filter_baseline_source"] = "estimated"
+        diagnostics["pre_filter_baseline_order"] = int(cfg.baseline_order)
     acc = acc - baseline
     diagnostics["baseline_coefficients"] = coeffs
     diagnostics["pre_filter_baseline_coefficients"] = coeffs
@@ -403,9 +497,31 @@ def correct_record(record: MotionRecord, config: CorrectionConfig | None = None)
     )
     diagnostics["filter"] = filter_meta
 
-    if cfg.post_filter_baseline_order is not None and cfg.post_filter_baseline_order >= 0:
+    post_user_coeffs = coerce_polynomial_coefficients(
+        cfg.post_filter_baseline_coefficients
+    )
+    if post_user_coeffs is not None:
+        post_baseline, post_coeffs = evaluate_polynomial_baseline(
+            acc.size, post_user_coeffs
+        )
+        acc = acc - post_baseline
+        diagnostics["post_filter_baseline_coefficients"] = post_coeffs
+        diagnostics["post_filter_baseline_order"] = int(post_coeffs.size - 1)
+        diagnostics["post_filter_baseline_source"] = "user_coefficients"
+        if (
+            cfg.post_filter_constrain_final_velocity
+            or cfg.post_filter_constrain_final_displacement
+        ):
+            diagnostics["post_filter_constraint_note"] = (
+                "terminal constraints are not re-estimated when explicit post_filter_baseline_coefficients are supplied"
+            )
+    elif (
+        cfg.post_filter_baseline_order is not None
+        and cfg.post_filter_baseline_order >= 0
+    ):
         post_constrain_disp = (
-            cfg.post_filter_constrain_final_displacement and cfg.post_filter_baseline_order >= 1
+            cfg.post_filter_constrain_final_displacement
+            and cfg.post_filter_baseline_order >= 1
         )
         post_baseline, post_coeffs = polynomial_baseline(
             acc,
@@ -419,9 +535,12 @@ def correct_record(record: MotionRecord, config: CorrectionConfig | None = None)
         acc = acc - post_baseline
         diagnostics["post_filter_baseline_coefficients"] = post_coeffs
         diagnostics["post_filter_baseline_order"] = int(cfg.post_filter_baseline_order)
+        diagnostics["post_filter_baseline_source"] = "estimated"
 
     velocity, displacement = integrate_motion(acc, dt)
-    corrected = record.with_acceleration(acc, units="m/s^2", metadata={"processing": "signalprocessor"})
+    corrected = record.with_acceleration(
+        acc, units="m/s^2", metadata={"processing": "signalprocessor"}
+    )
     metrics = compute_ground_motion_parameters(corrected)
     diagnostics["final_velocity_mps"] = float(velocity[-1])
     diagnostics["final_displacement_m"] = float(displacement[-1])

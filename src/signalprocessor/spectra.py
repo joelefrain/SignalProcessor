@@ -8,7 +8,9 @@ from .records import MotionRecord, Spectrum
 from .units import acceleration_from_si
 
 
-def default_periods(min_period: float = 0.01, max_period: float = 6.0, count: int = 80) -> np.ndarray:
+def default_periods(
+    min_period: float = 0.01, max_period: float = 6.0, count: int = 80
+) -> np.ndarray:
     return np.geomspace(min_period, max_period, count)
 
 
@@ -20,9 +22,13 @@ def response_spectrum(
     output_units: str = "g",
     return_peak_times: bool = False,
 ) -> Spectrum | tuple[Spectrum, np.ndarray]:
-    per = default_periods() if periods is None else np.asarray(periods, dtype=np.float64)
+    per = (
+        default_periods() if periods is None else np.asarray(periods, dtype=np.float64)
+    )
     acc = record.acceleration_si()
-    sd, psv, psa_si, saa_si, peak_index = newmark_response_spectrum(acc, record.dt, per, damping)
+    sd, psv, psa_si, saa_si, peak_index = newmark_response_spectrum(
+        acc, record.dt, per, damping
+    )
     del sd, psv, saa_si
     psa = acceleration_from_si(psa_si, output_units)
     spectrum = Spectrum(
@@ -30,7 +36,10 @@ def response_spectrum(
         sa=psa,
         units=output_units,
         damping=damping,
-        metadata={"source": record.metadata.get("source"), "kind": "pseudo_acceleration"},
+        metadata={
+            "source": record.metadata.get("source"),
+            "kind": "pseudo_acceleration",
+        },
     )
     if return_peak_times:
         return spectrum, record.time[np.clip(peak_index, 0, record.npts - 1)]

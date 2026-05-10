@@ -36,7 +36,9 @@ class MatchingResult:
     history: list[dict[str, float]] = field(default_factory=list)
 
 
-def gaussian_cosine_wavelet(time: np.ndarray, center: float, period: float, *, cycles: float = 3.0) -> np.ndarray:
+def gaussian_cosine_wavelet(
+    time: np.ndarray, center: float, period: float, *, cycles: float = 3.0
+) -> np.ndarray:
     width = max(period * cycles / 2.0, period)
     x = time - center
     env = np.exp(-0.5 * (x / width) ** 2)
@@ -88,7 +90,9 @@ def _frequency_domain_update(
     multiplier = np.ones_like(freqs)
     mask = (freqs >= control_freqs[0]) & (freqs <= control_freqs[-1]) & (freqs > 0.0)
     if np.any(mask):
-        multiplier[mask] = np.exp(np.interp(np.log(freqs[mask]), np.log(control_freqs), log_ratio))
+        multiplier[mask] = np.exp(
+            np.interp(np.log(freqs[mask]), np.log(control_freqs), log_ratio)
+        )
     adjusted = np.fft.irfft(fft * np.power(multiplier, relaxation), n=record.npts)
     return record.with_acceleration(adjusted, units="m/s^2")
 
@@ -101,7 +105,10 @@ def _wavelet_update(
     cfg: MatchingConfig,
 ) -> MotionRecord:
     target_sa = target.as_units(spectrum.units).interpolate(spectrum.periods)
-    log_error = np.log(np.maximum(target_sa, np.finfo(float).tiny) / np.maximum(spectrum.sa, np.finfo(float).tiny))
+    log_error = np.log(
+        np.maximum(target_sa, np.finfo(float).tiny)
+        / np.maximum(spectrum.sa, np.finfo(float).tiny)
+    )
     mask = _matching_mask(spectrum.periods, cfg.t_min, cfg.t_max)
     ranked = np.argsort(np.where(mask, np.abs(log_error), -np.inf))[::-1]
     selected = ranked[: cfg.max_periods_per_iteration]
@@ -114,12 +121,21 @@ def _wavelet_update(
             period=period,
             cycles=cfg.wavelet_cycles,
         )
-        desired_delta_si = cfg.relaxation * log_error[idx] * target_sa[idx] * (G0 if spectrum.units == "g" else 1.0)
+        desired_delta_si = (
+            cfg.relaxation
+            * log_error[idx]
+            * target_sa[idx]
+            * (G0 if spectrum.units == "g" else 1.0)
+        )
         adjustment_si += desired_delta_si * wave
-    return record.with_acceleration(record.acceleration_si() + adjustment_si, units="m/s^2")
+    return record.with_acceleration(
+        record.acceleration_si() + adjustment_si, units="m/s^2"
+    )
 
 
-def _matching_mask(periods: np.ndarray, t_min: float | None, t_max: float | None) -> np.ndarray:
+def _matching_mask(
+    periods: np.ndarray, t_min: float | None, t_max: float | None
+) -> np.ndarray:
     mask = np.ones(periods.size, dtype=bool)
     if t_min is not None:
         mask &= periods >= t_min
@@ -128,18 +144,26 @@ def _matching_mask(periods: np.ndarray, t_min: float | None, t_max: float | None
     return mask
 
 
-def match_spectrum(record: MotionRecord, target: Spectrum, config: MatchingConfig | None = None) -> MatchingResult:
+def match_spectrum(
+    record: MotionRecord, target: Spectrum, config: MatchingConfig | None = None
+) -> MatchingResult:
     cfg = config or MatchingConfig()
     method = cfg.method.lower()
     if method not in {"frequency", "wavelet", "hybrid"}:
-        raise ValueError("MatchingConfig.method must be 'frequency', 'wavelet', or 'hybrid'")
+        raise ValueError(
+            "MatchingConfig.method must be 'frequency', 'wavelet', or 'hybrid'"
+        )
     current = record
     if cfg.initial_linear_scale:
-        current = linear_scale(record, target, periods=target.periods, t_min=cfg.t_min, t_max=cfg.t_max).record
+        current = linear_scale(
+            record, target, periods=target.periods, t_min=cfg.t_min, t_max=cfg.t_max
+        ).record
 
     history: list[dict[str, float]] = []
     converged = False
-    spec = response_spectrum(current, target.periods, damping=target.damping, output_units=target.units)
+    spec = response_spectrum(
+        current, target.periods, damping=target.damping, output_units=target.units
+    )
 
     for iteration in range(cfg.max_iterations):
         spec, peak_times = response_spectrum(
@@ -150,7 +174,10 @@ def match_spectrum(record: MotionRecord, target: Spectrum, config: MatchingConfi
             return_peak_times=True,
         )
         target_sa = target.as_units(spec.units).interpolate(spec.periods)
-        log_error = np.log(np.maximum(target_sa, np.finfo(float).tiny) / np.maximum(spec.sa, np.finfo(float).tiny))
+        log_error = np.log(
+            np.maximum(target_sa, np.finfo(float).tiny)
+            / np.maximum(spec.sa, np.finfo(float).tiny)
+        )
         mask = _matching_mask(spec.periods, cfg.t_min, cfg.t_max)
         active_error = log_error[mask]
         metrics = spectral_misfit(spec, target, t_min=cfg.t_min, t_max=cfg.t_max)
@@ -184,7 +211,9 @@ def match_spectrum(record: MotionRecord, target: Spectrum, config: MatchingConfi
         if cfg.preserve_baseline:
             current = _baseline_safe(current)
 
-    spec = response_spectrum(current, target.periods, damping=target.damping, output_units=target.units)
+    spec = response_spectrum(
+        current, target.periods, damping=target.damping, output_units=target.units
+    )
     return MatchingResult(
         record=current,
         target=target,

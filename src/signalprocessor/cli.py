@@ -7,12 +7,29 @@ from pathlib import Path
 
 import numpy as np
 
-from .io import read_motion, read_target_spectrum, write_motion_csv, write_seismomatch_txt
+from .io import (
+    read_motion,
+    read_target_spectrum,
+    write_motion_csv,
+    write_seismomatch_txt,
+)
 from .matching import MatchingConfig, match_spectrum
 from .processing import CorrectionConfig, correct_record
 from .recommendation import recommend_correction_method
 from .scaling import linear_scale
 from .spectra import response_spectrum
+
+
+def _parse_coefficients(text: str | None) -> tuple[float, ...] | None:
+    if text is None:
+        return None
+    raw = text.strip()
+    if not raw:
+        return None
+    parts = [part.strip() for part in raw.replace(";", ",").split(",") if part.strip()]
+    if not parts:
+        return None
+    return tuple(float(part) for part in parts)
 
 
 def _periods(args) -> np.ndarray:
@@ -29,6 +46,7 @@ def cmd_correct(args) -> None:
         baseline_order=args.baseline_order,
         constrain_final_velocity=not args.no_final_velocity_constraint,
         constrain_final_displacement=args.final_displacement_constraint,
+        baseline_coefficients=_parse_coefficients(args.baseline_coefficients),
         despike=not args.no_despike,
         taper_fraction=args.taper_fraction,
         filter_order=args.filter_order,
@@ -38,15 +56,30 @@ def cmd_correct(args) -> None:
         bessel_norm=args.bessel_norm,
         zero_phase=not args.causal_filter,
         post_filter_baseline_order=args.post_filter_baseline_order,
+        post_filter_baseline_coefficients=_parse_coefficients(
+            args.post_filter_baseline_coefficients
+        ),
         post_filter_constrain_final_velocity=not args.no_post_filter_final_velocity_constraint,
         post_filter_constrain_final_displacement=args.post_filter_final_displacement_constraint,
     )
     result = correct_record(rec, cfg)
     write_motion_csv(result.record, args.output, units=args.output_units)
     print(f"wrote {args.output}")
-    print(f"PGA={result.metrics.pga / 9.80665:.4g} g PGV={result.metrics.pgv:.4g} m/s PGD={result.metrics.pgd:.4g} m")
-
-
+    print(
+        f"PGA={result.metrics.pga / 9.80665:.4g} g PGV={result.metrics.pgv:.4g} m/s PGD={result.metrics.pgd:.4g} m"
+    )
+    pre_coeffs = result.diagnostics.get("pre_filter_baseline_coefficients")
+    post_coeffs = result.diagnostics.get("post_filter_baseline_coefficients")
+    if pre_coeffs is not None:
+        print(
+            "baseline_coefficients_mps2="
+            + ",".join(f"{float(v):.10g}" for v in pre_coeffs)
+        )
+    if post_coeffs is not None:
+        print(
+            "post_filter_baseline_coefficients_mps2="
+            + ",".join(f"{float(v):.10g}" for v in post_coeffs)
+        )
 
 
 def cmd_recommend(args) -> None:
@@ -76,6 +109,8 @@ def cmd_recommend(args) -> None:
         "highpass_hz",
         "lowpass_hz",
         "post_filter_baseline_order",
+        "baseline_coefficients_mps2",
+        "post_filter_baseline_coefficients_mps2",
         "final_displacement_constraint",
         "post_filter_displacement_constraint",
         "final_velocity_ratio",
@@ -97,11 +132,19 @@ def cmd_recommend(args) -> None:
         writer.writeheader()
         writer.writerows(rows)
 
+
 def cmd_spectrum(args) -> None:
     rec = read_motion(args.input, units=args.units)
-    spec = response_spectrum(rec, _periods(args), damping=args.damping, output_units=args.output_units)
+    spec = response_spectrum(
+        rec, _periods(args), damping=args.damping, output_units=args.output_units
+    )
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-    np.savetxt(args.output, np.column_stack([spec.periods, spec.sa]), delimiter=",", fmt="%.10g")
+    np.savetxt(
+        args.output,
+        np.column_stack([spec.periods, spec.sa]),
+        delimiter=",",
+        fmt="%.10g",
+    )
     print(f"wrote {args.output}")
 
 
@@ -150,9 +193,27 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--highpass", type=float, default=0.05)
     p.add_argument("--lowpass", type=float)
     p.add_argument("--baseline-order", type=int, default=1)
+    p.add_argument(
+        "--baseline-coefficients",
+        help="Comma-separated acceleration polynomial coefficients c0,c1,c2,... in m/s^2 on normalized tau 0..1. Overrides fitted pre-filter baseline.",
+    )
     p.add_argument("--taper-fraction", type=float, default=0.02)
     p.add_argument("--filter-order", type=int, default=4)
-    p.add_argument("--filter-type", default="butterworth", choices=["butterworth", "cheby1", "cheby2", "chebyshev", "chebyshev2", "chevyshev", "chevyshev2", "ellip", "bessel"])
+    p.add_argument(
+        "--filter-type",
+        default="butterworth",
+        choices=[
+            "butterworth",
+            "cheby1",
+            "cheby2",
+            "chebyshev",
+            "chebyshev2",
+            "chevyshev",
+            "chevyshev2",
+            "ellip",
+            "bessel",
+        ],
+    )
     p.add_argument("--filter-ripple-db", type=float, default=0.5)
     p.add_argument("--filter-attenuation-db", type=float, default=40.0)
     p.add_argument("--bessel-norm", default="phase", choices=["phase", "delay", "mag"])
@@ -160,6 +221,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-final-velocity-constraint", action="store_true")
     p.add_argument("--final-displacement-constraint", action="store_true")
     p.add_argument("--post-filter-baseline-order", type=int)
+    p.add_argument(
+        "--post-filter-baseline-coefficients",
+        help="Comma-separated acceleration polynomial coefficients c0,c1,c2,... in m/s^2 on normalized tau 0..1. Overrides fitted post-filter baseline.",
+    )
     p.add_argument("--no-post-filter-final-velocity-constraint", action="store_true")
     p.add_argument("--post-filter-final-displacement-constraint", action="store_true")
     p.add_argument("--no-despike", action="store_true")
@@ -168,7 +233,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("recommend")
     p.add_argument("input")
     p.add_argument("--units")
-    p.add_argument("--filter-types", default="all", help="all, butterworth, bessel, cheby1, cheby2, ellip or a comma-separated list")
+    p.add_argument(
+        "--filter-types",
+        default="all",
+        help="all, butterworth, bessel, cheby1, cheby2, ellip or a comma-separated list",
+    )
     p.add_argument("--snr-threshold", type=float, default=3.0)
     p.add_argument("--damping", type=float, default=0.05)
     p.add_argument("--t-min", type=float, default=0.05)

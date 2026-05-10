@@ -5,6 +5,7 @@ import numpy as np
 try:
     from numba import njit
 except Exception:  # pragma: no cover
+
     def njit(*_args, **_kwargs):
         def decorator(func):
             return func
@@ -41,10 +42,7 @@ def central_difference(values: np.ndarray, dt: float) -> np.ndarray:
     out[1] = (values[2] - values[0]) / (2.0 * dt)
     for i in range(2, n - 2):
         out[i] = (
-            values[i - 2]
-            - 8.0 * values[i - 1]
-            + 8.0 * values[i + 1]
-            - values[i + 2]
+            values[i - 2] - 8.0 * values[i - 1] + 8.0 * values[i + 1] - values[i + 2]
         ) / (12.0 * dt)
     out[n - 2] = (values[n - 1] - values[n - 3]) / (2.0 * dt)
     out[n - 1] = (values[n - 1] - values[n - 2]) / dt

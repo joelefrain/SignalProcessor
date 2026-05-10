@@ -69,7 +69,9 @@ class MotionRecord:
 
     def as_units(self, units: str) -> "MotionRecord":
         acc_si = self.acceleration_si()
-        return replace(self, acceleration=acceleration_from_si(acc_si, units), units=units)
+        return replace(
+            self, acceleration=acceleration_from_si(acc_si, units), units=units
+        )
 
     def with_acceleration(
         self,
