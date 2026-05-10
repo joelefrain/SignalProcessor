@@ -72,6 +72,7 @@ def compare_scaling_to_seismomatch(
     t_min: float = 0.2,
     t_max: float = 2.0,
     matched: bool = False,
+    matching_method: str = "hybrid",
 ) -> dict[str, float | str]:
     record = read_motion(motion_path)
     target = read_target_spectrum(target_path)
@@ -80,7 +81,11 @@ def compare_scaling_to_seismomatch(
             record,
             target,
             MatchingConfig(
-                max_iterations=15, relaxation=0.35, t_min=t_min, t_max=t_max
+                method=matching_method,
+                max_iterations=15,
+                relaxation=0.35,
+                t_min=t_min,
+                t_max=t_max,
             ),
         )
         scaled_record = match.record
@@ -92,7 +97,7 @@ def compare_scaling_to_seismomatch(
         rms_log_error = spectral_misfit(
             scaled_spectrum, target, t_min=t_min, t_max=t_max
         )["rms_log_error"]
-        method = "matched"
+        method = f"matched_{matching_method}"
     else:
         result = linear_scale(record, target, t_min=t_min, t_max=t_max)
         scaled_record = result.record

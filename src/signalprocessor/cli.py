@@ -44,6 +44,8 @@ def cmd_correct(args) -> None:
         highpass_hz=args.highpass,
         lowpass_hz=args.lowpass,
         baseline_order=args.baseline_order,
+        baseline_fit_method=args.baseline_fit_method,
+        baseline_fit_post_event_start_seconds=args.baseline_fit_post_event_start,
         constrain_final_velocity=not args.no_final_velocity_constraint,
         constrain_final_displacement=args.final_displacement_constraint,
         baseline_coefficients=_parse_coefficients(args.baseline_coefficients),
@@ -56,6 +58,8 @@ def cmd_correct(args) -> None:
         bessel_norm=args.bessel_norm,
         zero_phase=not args.causal_filter,
         post_filter_baseline_order=args.post_filter_baseline_order,
+        post_filter_baseline_fit_method=args.post_filter_baseline_fit_method,
+        post_filter_baseline_fit_post_event_start_seconds=args.post_filter_baseline_fit_post_event_start,
         post_filter_baseline_coefficients=_parse_coefficients(
             args.post_filter_baseline_coefficients
         ),
@@ -106,9 +110,13 @@ def cmd_recommend(args) -> None:
         "score",
         "filter_type",
         "baseline_order",
+        "baseline_fit_method",
+        "baseline_weighting_effective_method",
         "highpass_hz",
         "lowpass_hz",
         "post_filter_baseline_order",
+        "post_filter_baseline_fit_method",
+        "post_filter_baseline_weighting_effective_method",
         "baseline_coefficients_mps2",
         "post_filter_baseline_coefficients_mps2",
         "final_displacement_constraint",
@@ -161,6 +169,7 @@ def cmd_match(args) -> None:
     rec = read_motion(args.input, units=args.units)
     target = read_target_spectrum(args.target, units=args.target_units)
     cfg = MatchingConfig(
+        method=args.method,
         max_iterations=args.max_iterations,
         relaxation=args.relaxation,
         t_min=args.t_min,
@@ -172,7 +181,9 @@ def cmd_match(args) -> None:
     else:
         write_motion_csv(result.record, args.output, units=args.output_units)
     print(f"wrote {args.output}")
-    print(f"iterations={result.iterations} converged={result.converged}")
+    print(
+        f"method={args.method} iterations={result.iterations} converged={result.converged}"
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -193,6 +204,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--highpass", type=float, default=0.05)
     p.add_argument("--lowpass", type=float)
     p.add_argument("--baseline-order", type=int, default=1)
+    p.add_argument(
+        "--baseline-fit-method",
+        default="global",
+        choices=["global", "quiet_windows"],
+        help="Method for estimating baseline coefficients when --baseline-coefficients is not provided.",
+    )
+    p.add_argument(
+        "--baseline-fit-post-event-start",
+        type=float,
+        help="Start time in seconds of the post-event quiet window used by --baseline-fit-method quiet_windows.",
+    )
     p.add_argument(
         "--baseline-coefficients",
         help="Comma-separated acceleration polynomial coefficients c0,c1,c2,... in m/s^2 on normalized tau 0..1. Overrides fitted pre-filter baseline.",
@@ -221,6 +243,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-final-velocity-constraint", action="store_true")
     p.add_argument("--final-displacement-constraint", action="store_true")
     p.add_argument("--post-filter-baseline-order", type=int)
+    p.add_argument(
+        "--post-filter-baseline-fit-method",
+        default="global",
+        choices=["global", "quiet_windows"],
+        help="Method for estimating post-filter baseline coefficients when explicit coefficients are not provided.",
+    )
+    p.add_argument(
+        "--post-filter-baseline-fit-post-event-start",
+        type=float,
+        help="Start time in seconds of the post-event quiet window used by post-filter quiet-window fitting.",
+    )
     p.add_argument(
         "--post-filter-baseline-coefficients",
         help="Comma-separated acceleration polynomial coefficients c0,c1,c2,... in m/s^2 on normalized tau 0..1. Overrides fitted post-filter baseline.",
@@ -274,6 +307,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--units")
     p.add_argument("--target-units", default="g")
     p.add_argument("--output-units", default="g")
+    p.add_argument(
+        "--method",
+        default="hybrid",
+        choices=["frequency", "wavelet", "hybrid"],
+        help="Spectral matching update: frequency, wavelet or stabilized hybrid.",
+    )
     p.add_argument("--max-iterations", type=int, default=15)
     p.add_argument("--relaxation", type=float, default=0.35)
     p.add_argument("--t-min", type=float, default=0.2)

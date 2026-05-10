@@ -27,12 +27,16 @@ FilterType = Literal[
     "bessel",
 ]
 
+BaselineFitMethod = Literal["global", "quiet_windows"]
+
 
 @dataclass(frozen=True, slots=True)
 class CorrectionConfig:
     remove_mean: bool = True
     pre_event_seconds: float | None = None
     baseline_order: int = 1
+    baseline_fit_method: str = "global"
+    baseline_fit_post_event_start_seconds: float | None = None
     constrain_final_velocity: bool = True
     constrain_final_displacement: bool = False
     target_final_velocity: float = 0.0
@@ -50,6 +54,8 @@ class CorrectionConfig:
     bessel_norm: str = "phase"
     zero_phase: bool = True
     post_filter_baseline_order: int | None = None
+    post_filter_baseline_fit_method: str = "global"
+    post_filter_baseline_fit_post_event_start_seconds: float | None = None
     post_filter_baseline_coefficients: tuple[float, ...] | None = None
     post_filter_constrain_final_velocity: bool = True
     post_filter_constrain_final_displacement: bool = False
@@ -91,6 +97,104 @@ def _constraint_rows(design: np.ndarray, dt: float) -> tuple[np.ndarray, np.ndar
         velocity_row[i] = velocity[-1]
         displacement_row[i] = displacement[-1]
     return velocity_row, displacement_row
+
+
+def _normalize_baseline_fit_method(method: str | None) -> str:
+    key = (method or "global").strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "global": "global",
+        "all": "global",
+        "full": "global",
+        "quiet": "quiet_windows",
+        "quiet_window": "quiet_windows",
+        "quiet_windows": "quiet_windows",
+        "ventanas_quietas": "quiet_windows",
+        "ventanas_tranquilas": "quiet_windows",
+        "pre_post": "quiet_windows",
+    }
+    try:
+        return aliases[key]
+    except KeyError as exc:
+        raise ValueError(
+            "baseline_fit_method must be 'global' or 'quiet_windows'"
+        ) from exc
+
+
+def baseline_fit_weights(
+    npts: int,
+    dt: float,
+    *,
+    method: str = "global",
+    pre_event_seconds: float | None = None,
+    post_event_start_seconds: float | None = None,
+    signal_weight: float = 0.05,
+    min_quiet_samples: int = 8,
+) -> tuple[np.ndarray, dict[str, float | int | str | None]]:
+    """Return weights for fitting an acceleration-domain baseline.
+
+    ``global`` gives every sample equal weight. ``quiet_windows`` follows the
+    theoretical baseline workflow: high weight is assigned to pre-event and
+    post-event quiet windows, while the strong-motion interval receives a small
+    non-zero weight to keep the least-squares problem numerically stable. If
+    not enough quiet samples are available, the function falls back to a global
+    fit and records that choice in the returned metadata.
+    """
+
+    n = int(npts)
+    if n < 2:
+        raise ValueError("npts must be at least 2")
+    dt = float(dt)
+    if dt <= 0.0:
+        raise ValueError("dt must be positive")
+
+    requested = _normalize_baseline_fit_method(method)
+    if requested == "global":
+        weights = np.ones(n, dtype=np.float64)
+        return weights, {
+            "requested_method": requested,
+            "effective_method": "global",
+            "quiet_sample_count": n,
+            "signal_weight": 1.0,
+            "pre_event_seconds": pre_event_seconds,
+            "post_event_start_seconds": post_event_start_seconds,
+        }
+
+    signal_weight = float(np.clip(signal_weight, 1.0e-6, 1.0))
+    weights = np.full(n, signal_weight, dtype=np.float64)
+    quiet = np.zeros(n, dtype=bool)
+
+    if pre_event_seconds is not None and pre_event_seconds > 0.0:
+        pre_n = int(np.floor(float(pre_event_seconds) / dt)) + 1
+        pre_n = max(0, min(n, pre_n))
+        quiet[:pre_n] = True
+
+    if post_event_start_seconds is not None and post_event_start_seconds >= 0.0:
+        post_idx = int(np.ceil(float(post_event_start_seconds) / dt))
+        post_idx = max(0, min(n, post_idx))
+        quiet[post_idx:] = True
+
+    quiet_count = int(np.count_nonzero(quiet))
+    if quiet_count < max(1, int(min_quiet_samples)):
+        weights[:] = 1.0
+        return weights, {
+            "requested_method": requested,
+            "effective_method": "global",
+            "quiet_sample_count": quiet_count,
+            "signal_weight": 1.0,
+            "pre_event_seconds": pre_event_seconds,
+            "post_event_start_seconds": post_event_start_seconds,
+            "fallback_reason": "insufficient_quiet_samples",
+        }
+
+    weights[quiet] = 1.0
+    return weights, {
+        "requested_method": requested,
+        "effective_method": "quiet_windows",
+        "quiet_sample_count": quiet_count,
+        "signal_weight": signal_weight,
+        "pre_event_seconds": pre_event_seconds,
+        "post_event_start_seconds": post_event_start_seconds,
+    }
 
 
 def coerce_polynomial_coefficients(
@@ -146,6 +250,7 @@ def polynomial_baseline(
     constrain_displacement: bool = False,
     target_final_velocity: float = 0.0,
     target_final_displacement: float = 0.0,
+    sample_weights: Sequence[float] | np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Fit an acceleration-domain polynomial baseline and optional constraints.
 
@@ -168,8 +273,22 @@ def polynomial_baseline(
     order = int(order)
     tau = np.linspace(0.0, 1.0, acc.size, dtype=np.float64)
     design = np.vander(tau, N=order + 1, increasing=True)
-    lhs = design.T @ design
-    rhs = design.T @ acc
+    if sample_weights is None:
+        weights = np.ones(acc.size, dtype=np.float64)
+    else:
+        weights = np.asarray(sample_weights, dtype=np.float64)
+        if weights.shape != acc.shape:
+            raise ValueError("sample_weights must have the same shape as acceleration")
+        if not np.all(np.isfinite(weights)):
+            raise ValueError("sample_weights must be finite")
+        weights = np.maximum(weights, 0.0)
+        if not np.any(weights > 0.0):
+            raise ValueError("sample_weights must contain at least one positive value")
+    sqrt_weights = np.sqrt(weights)
+    weighted_design = design * sqrt_weights[:, None]
+    weighted_acc = acc * sqrt_weights
+    lhs = weighted_design.T @ weighted_design
+    rhs = weighted_design.T @ weighted_acc
 
     velocity, displacement = integrate_motion(acc, dt)
     velocity_row, displacement_row = _constraint_rows(design, dt)
@@ -194,13 +313,13 @@ def polynomial_baseline(
             # Over-constrained low-order models are solved as high-weighted
             # least squares instead of silently ignoring the requested targets.
             weight = max(np.linalg.norm(lhs, ord=2), 1.0) * 1.0e6
-            augmented_lhs = np.vstack([design, np.sqrt(weight) * cmat])
+            augmented_lhs = np.vstack([weighted_design, np.sqrt(weight) * cmat])
             augmented_rhs = np.concatenate(
-                [acc, np.sqrt(weight) * np.asarray(targets, dtype=np.float64)]
+                [weighted_acc, np.sqrt(weight) * np.asarray(targets, dtype=np.float64)]
             )
             coeffs = np.linalg.lstsq(augmented_lhs, augmented_rhs, rcond=None)[0]
     else:
-        coeffs = np.linalg.lstsq(design, acc, rcond=None)[0]
+        coeffs = np.linalg.lstsq(weighted_design, weighted_acc, rcond=None)[0]
 
     baseline = design @ coeffs
     return baseline, coeffs
@@ -459,12 +578,25 @@ def correct_record(
         baseline, coeffs = evaluate_polynomial_baseline(acc.size, user_coeffs)
         diagnostics["pre_filter_baseline_source"] = "user_coefficients"
         diagnostics["pre_filter_baseline_order"] = int(coeffs.size - 1)
+        diagnostics["pre_filter_baseline_fit_method"] = "explicit_coefficients"
+        diagnostics["pre_filter_baseline_weighting"] = {
+            "requested_method": "explicit_coefficients",
+            "effective_method": "explicit_coefficients",
+        }
         if cfg.constrain_final_velocity or cfg.constrain_final_displacement:
             diagnostics["pre_filter_constraint_note"] = (
                 "terminal constraints are not re-estimated when explicit baseline_coefficients are supplied"
             )
     else:
         constrain_disp = cfg.constrain_final_displacement and cfg.baseline_order >= 1
+        baseline_weights, baseline_weight_meta = baseline_fit_weights(
+            acc.size,
+            dt,
+            method=cfg.baseline_fit_method,
+            pre_event_seconds=cfg.pre_event_seconds,
+            post_event_start_seconds=cfg.baseline_fit_post_event_start_seconds,
+            min_quiet_samples=max(8, 2 * (int(cfg.baseline_order) + 1)),
+        )
         baseline, coeffs = polynomial_baseline(
             acc,
             dt,
@@ -473,9 +605,14 @@ def correct_record(
             constrain_displacement=constrain_disp,
             target_final_velocity=cfg.target_final_velocity,
             target_final_displacement=cfg.target_final_displacement,
+            sample_weights=baseline_weights,
         )
         diagnostics["pre_filter_baseline_source"] = "estimated"
         diagnostics["pre_filter_baseline_order"] = int(cfg.baseline_order)
+        diagnostics["pre_filter_baseline_fit_method"] = baseline_weight_meta[
+            "effective_method"
+        ]
+        diagnostics["pre_filter_baseline_weighting"] = baseline_weight_meta
     acc = acc - baseline
     diagnostics["baseline_coefficients"] = coeffs
     diagnostics["pre_filter_baseline_coefficients"] = coeffs
@@ -508,6 +645,11 @@ def correct_record(
         diagnostics["post_filter_baseline_coefficients"] = post_coeffs
         diagnostics["post_filter_baseline_order"] = int(post_coeffs.size - 1)
         diagnostics["post_filter_baseline_source"] = "user_coefficients"
+        diagnostics["post_filter_baseline_fit_method"] = "explicit_coefficients"
+        diagnostics["post_filter_baseline_weighting"] = {
+            "requested_method": "explicit_coefficients",
+            "effective_method": "explicit_coefficients",
+        }
         if (
             cfg.post_filter_constrain_final_velocity
             or cfg.post_filter_constrain_final_displacement
@@ -523,6 +665,18 @@ def correct_record(
             cfg.post_filter_constrain_final_displacement
             and cfg.post_filter_baseline_order >= 1
         )
+        post_weights, post_weight_meta = baseline_fit_weights(
+            acc.size,
+            dt,
+            method=cfg.post_filter_baseline_fit_method,
+            pre_event_seconds=cfg.pre_event_seconds,
+            post_event_start_seconds=(
+                cfg.post_filter_baseline_fit_post_event_start_seconds
+                if cfg.post_filter_baseline_fit_post_event_start_seconds is not None
+                else cfg.baseline_fit_post_event_start_seconds
+            ),
+            min_quiet_samples=max(8, 2 * (int(cfg.post_filter_baseline_order) + 1)),
+        )
         post_baseline, post_coeffs = polynomial_baseline(
             acc,
             dt,
@@ -531,11 +685,16 @@ def correct_record(
             constrain_displacement=post_constrain_disp,
             target_final_velocity=cfg.target_final_velocity,
             target_final_displacement=cfg.target_final_displacement,
+            sample_weights=post_weights,
         )
         acc = acc - post_baseline
         diagnostics["post_filter_baseline_coefficients"] = post_coeffs
         diagnostics["post_filter_baseline_order"] = int(cfg.post_filter_baseline_order)
         diagnostics["post_filter_baseline_source"] = "estimated"
+        diagnostics["post_filter_baseline_fit_method"] = post_weight_meta[
+            "effective_method"
+        ]
+        diagnostics["post_filter_baseline_weighting"] = post_weight_meta
 
     velocity, displacement = integrate_motion(acc, dt)
     corrected = record.with_acceleration(

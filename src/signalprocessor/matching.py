@@ -21,6 +21,8 @@ class MatchingConfig:
     t_max: float | None = None
     max_periods_per_iteration: int = 10
     wavelet_cycles: float = 3.0
+    wavelet_regularization: float = 0.05
+    wavelet_max_adjustment_fraction: float = 0.35
     frequency_clip: tuple[float, float] = (0.2, 5.0)
     preserve_baseline: bool = True
     initial_linear_scale: bool = True
@@ -48,6 +50,51 @@ def gaussian_cosine_wavelet(
     if peak > 0.0:
         wave = wave / peak
     return wave
+
+
+def _relative_displacement_histories(
+    acceleration: np.ndarray, dt: float, periods: np.ndarray, damping: float
+) -> np.ndarray:
+    acc = np.asarray(acceleration, dtype=np.float64)
+    per = np.asarray(periods, dtype=np.float64)
+    histories = np.zeros((per.size, acc.size), dtype=np.float64)
+    beta = 0.25
+    gamma = 0.5
+    for j, period in enumerate(per):
+        if period <= 1.0e-12:
+            continue
+        omega = 2.0 * np.pi / float(period)
+        k = omega * omega
+        c = 2.0 * damping * omega
+        a0 = 1.0 / (beta * dt * dt)
+        a1 = gamma / (beta * dt)
+        a2 = 1.0 / (beta * dt)
+        a3 = 1.0 / (2.0 * beta) - 1.0
+        a4 = gamma / beta - 1.0
+        a5 = dt * (gamma / (2.0 * beta) - 1.0)
+        k_eff = k + a0 + a1 * c
+
+        u = 0.0
+        v = 0.0
+        rel_acc = -acc[0] - c * v - k * u
+        histories[j, 0] = u
+        for i in range(acc.size - 1):
+            p_next = -acc[i + 1]
+            p_eff = (
+                p_next
+                + a0 * u
+                + a2 * v
+                + a3 * rel_acc
+                + c * (a1 * u + a4 * v + a5 * rel_acc)
+            )
+            u_next = p_eff / k_eff
+            rel_acc_next = a0 * (u_next - u) - a2 * v - a3 * rel_acc
+            v_next = v + dt * ((1.0 - gamma) * rel_acc + gamma * rel_acc_next)
+            histories[j, i + 1] = u_next
+            u = u_next
+            v = v_next
+            rel_acc = rel_acc_next
+    return histories
 
 
 def _baseline_safe(record: MotionRecord) -> MotionRecord:
@@ -110,27 +157,82 @@ def _wavelet_update(
         / np.maximum(spectrum.sa, np.finfo(float).tiny)
     )
     mask = _matching_mask(spectrum.periods, cfg.t_min, cfg.t_max)
-    ranked = np.argsort(np.where(mask, np.abs(log_error), -np.inf))[::-1]
-    selected = ranked[: cfg.max_periods_per_iteration]
-    adjustment_si = np.zeros(record.npts, dtype=np.float64)
-    for idx in selected:
-        period = float(target.periods[idx])
-        wave = gaussian_cosine_wavelet(
+    active = np.flatnonzero(mask)
+    if active.size == 0:
+        return record
+
+    order = np.argsort(np.abs(log_error[active]))[::-1]
+    selected = active[order[: cfg.max_periods_per_iteration]]
+    selected_periods = spectrum.periods[selected]
+    acc = record.acceleration_si()
+    max_acc = max(float(np.max(np.abs(acc))), np.finfo(float).eps)
+    peak_indices = np.searchsorted(record.time, peak_times[selected], side="left")
+    peak_indices = np.clip(peak_indices, 0, record.npts - 1)
+    current_histories = _relative_displacement_histories(
+        acc, record.dt, selected_periods, target.damping
+    )
+    current_peak_disp = current_histories[np.arange(selected.size), peak_indices]
+    signs = np.where(current_peak_disp < 0.0, -1.0, 1.0)
+    target_sa_si = target.as_units("m/s^2").interpolate(spectrum.periods)[selected]
+    omega = 2.0 * np.pi / selected_periods
+    target_sd = target_sa_si / (omega * omega)
+    desired = signs * target_sd - current_peak_disp
+
+    waves = [
+        gaussian_cosine_wavelet(
             record.time,
             center=float(peak_times[idx]),
-            period=period,
+            period=float(spectrum.periods[idx]),
             cycles=cfg.wavelet_cycles,
         )
-        desired_delta_si = (
-            cfg.relaxation
-            * log_error[idx]
-            * target_sa[idx]
-            * (G0 if spectrum.units == "g" else 1.0)
+        for idx in selected
+    ]
+    sensitivity = np.empty((selected.size, selected.size), dtype=np.float64)
+    for col, wave in enumerate(waves):
+        wave_histories = _relative_displacement_histories(
+            wave, record.dt, selected_periods, target.damping
         )
-        adjustment_si += desired_delta_si * wave
-    return record.with_acceleration(
-        record.acceleration_si() + adjustment_si, units="m/s^2"
-    )
+        sensitivity[:, col] = wave_histories[np.arange(selected.size), peak_indices]
+
+    if not np.all(np.isfinite(sensitivity)):
+        return record
+
+    singular = np.linalg.svd(sensitivity, compute_uv=False)
+    lambda_reg = max(float(singular[0]) * cfg.wavelet_regularization, 1.0e-12)
+    lhs = sensitivity.T @ sensitivity + (lambda_reg**2) * np.eye(selected.size)
+    rhs = sensitivity.T @ desired
+    amplitudes = np.linalg.lstsq(lhs, rhs, rcond=None)[0]
+    max_amplitude = max(cfg.wavelet_max_adjustment_fraction * max_acc, 1.0e-4 * G0)
+    amplitudes = np.clip(amplitudes, -max_amplitude, max_amplitude)
+
+    adjustment_si = np.zeros(record.npts, dtype=np.float64)
+    for amplitude, wave in zip(amplitudes, waves, strict=True):
+        adjustment_si += float(amplitude) * wave
+    adjustment_si *= cfg.relaxation
+
+    current_rms = float(np.sqrt(np.mean(log_error[mask] * log_error[mask])))
+    best_record = record
+    best_rms = current_rms
+    for step in (1.0, 0.5, 0.25, 0.125, 0.0625):
+        trial = record.with_acceleration(acc + step * adjustment_si, units="m/s^2")
+        trial_spectrum = response_spectrum(
+            trial,
+            spectrum.periods,
+            damping=target.damping,
+            output_units=spectrum.units,
+        )
+        trial_target_sa = target.as_units(trial_spectrum.units).interpolate(
+            trial_spectrum.periods
+        )
+        trial_error = np.log(
+            np.maximum(trial_target_sa, np.finfo(float).tiny)
+            / np.maximum(trial_spectrum.sa, np.finfo(float).tiny)
+        )
+        trial_rms = float(np.sqrt(np.mean(trial_error[mask] * trial_error[mask])))
+        if trial_rms < best_rms:
+            best_record = trial
+            best_rms = trial_rms
+    return best_record
 
 
 def _matching_mask(
@@ -201,6 +303,14 @@ def match_spectrum(
                 clip=cfg.frequency_clip,
                 mask=mask,
             )
+            if method == "hybrid":
+                spec, peak_times = response_spectrum(
+                    current,
+                    target.periods,
+                    damping=target.damping,
+                    output_units=target.units,
+                    return_peak_times=True,
+                )
         if method in {"wavelet", "hybrid"}:
             current = _wavelet_update(current, spec, target, peak_times, cfg)
         current = current.with_acceleration(

@@ -85,6 +85,30 @@ class CorrectionCandidate:
     config: CorrectionConfig
 
 
+@dataclass(frozen=True, slots=True)
+class ScoreComponent:
+    key: str
+    label: str
+    raw_value: float
+    threshold: float | None
+    normalized_value: float
+    weight: float
+    contribution: float
+    description: str
+
+    def to_row(self) -> dict[str, float | str | None]:
+        return {
+            "component_key": self.key,
+            "component": self.label,
+            "raw_value": self.raw_value,
+            "threshold": self.threshold,
+            "normalized_value": self.normalized_value,
+            "weight": self.weight,
+            "contribution": self.contribution,
+            "description": self.description,
+        }
+
+
 def _format_coefficients_for_row(coefficients) -> str:
     if coefficients is None:
         return ""
@@ -113,19 +137,48 @@ class CorrectionCandidateEvaluation:
     cav_log_change: float
     complexity_penalty: float
     filter_penalty: float
+    score_components: tuple[ScoreComponent, ...]
     notes: tuple[str, ...]
+
+    def dominant_components(self, limit: int = 3) -> tuple[ScoreComponent, ...]:
+        ranked = sorted(
+            self.score_components,
+            key=lambda component: component.contribution,
+            reverse=True,
+        )
+        return tuple(component for component in ranked if component.contribution > 0.0)[
+            :limit
+        ]
+
+    def trace_rows(self) -> list[dict[str, float | str | None]]:
+        rows: list[dict[str, float | str | None]] = []
+        for component in self.score_components:
+            row = component.to_row()
+            row["method"] = self.name
+            row["candidate_score"] = self.score
+            rows.append(row)
+        return rows
 
     def to_row(self) -> dict[str, float | str | bool | None]:
         cfg = self.config
+        dominant = self.dominant_components()
         return {
             "method": self.name,
             "score": self.score,
+            "score_top_drivers": "; ".join(
+                f"{component.label}={component.contribution:.3g}"
+                for component in dominant
+            ),
             "baseline_order": cfg.baseline_order,
+            "baseline_fit_method": cfg.baseline_fit_method,
+            "baseline_fit_post_event_start_seconds": cfg.baseline_fit_post_event_start_seconds,
             "highpass_hz": cfg.highpass_hz,
             "lowpass_hz": cfg.lowpass_hz,
             "filter_type": cfg.filter_type,
             "taper_fraction": cfg.taper_fraction,
             "post_filter_baseline_order": cfg.post_filter_baseline_order,
+            "post_filter_baseline_fit_method": cfg.post_filter_baseline_fit_method,
+            "post_filter_baseline_fit_post_event_start_seconds": cfg.post_filter_baseline_fit_post_event_start_seconds,
             "baseline_coefficients_mps2": _format_coefficients_for_row(
                 self.result.diagnostics.get("pre_filter_baseline_coefficients")
             ),
@@ -138,6 +191,20 @@ class CorrectionCandidateEvaluation:
             "post_filter_baseline_coefficients_source": self.result.diagnostics.get(
                 "post_filter_baseline_source", ""
             ),
+            "baseline_weighting_effective_method": self.result.diagnostics.get(
+                "pre_filter_baseline_fit_method", ""
+            ),
+            "baseline_quiet_sample_count": (
+                self.result.diagnostics.get("pre_filter_baseline_weighting", {})
+                or {}
+            ).get("quiet_sample_count", ""),
+            "post_filter_baseline_weighting_effective_method": self.result.diagnostics.get(
+                "post_filter_baseline_fit_method", ""
+            ),
+            "post_filter_baseline_quiet_sample_count": (
+                self.result.diagnostics.get("post_filter_baseline_weighting", {})
+                or {}
+            ).get("quiet_sample_count", ""),
             "final_velocity_constraint": cfg.constrain_final_velocity,
             "final_displacement_constraint": cfg.constrain_final_displacement,
             "post_filter_displacement_constraint": cfg.post_filter_constrain_final_displacement,
@@ -166,6 +233,15 @@ class CorrectionRecommendation:
 
     def to_rows(self) -> list[dict[str, float | str | bool | None]]:
         return [candidate.to_row() for candidate in self.candidates]
+
+    def to_trace_rows(
+        self, *, top: int | None = None
+    ) -> list[dict[str, float | str | None]]:
+        selected = self.candidates if top is None else self.candidates[:top]
+        rows: list[dict[str, float | str | None]] = []
+        for candidate in selected:
+            rows.extend(candidate.trace_rows())
+        return rows
 
 
 DEFAULT_RECOMMENDATION_FILTER_TYPES = (
@@ -474,7 +550,7 @@ def recommend_correction_parameters(
         f"Despiking {'activado' if despike else 'no requerido'}; candidatos detectados={spike_count}.",
         f"Familias de filtro evaluadas: {', '.join(selected_filter_types)}.",
         *snr_notes,
-        "Se evaluan ordenes bajos de baseline, sensibilidad de high-pass y candidatos de control de deriva de largo periodo.",
+        "Se evaluan ordenes bajos de baseline con pesos en ventanas quietas pre/post-evento, sensibilidad de high-pass y candidatos de control de deriva de largo periodo.",
     ]
 
     return CorrectionParameterSuggestion(
@@ -522,12 +598,16 @@ def build_correction_candidates(
     base = CorrectionConfig(
         remove_mean=params.remove_mean,
         pre_event_seconds=params.windows.pre_event_seconds,
+        baseline_fit_method="quiet_windows",
+        baseline_fit_post_event_start_seconds=params.windows.post_event_start_seconds,
         despike=params.despike,
         spike_sigma=params.spike_sigma,
         taper_fraction=params.taper_fraction,
         filter_order=params.filter_order,
         zero_phase=params.zero_phase,
         constrain_final_velocity=params.constrain_final_velocity,
+        post_filter_baseline_fit_method="quiet_windows",
+        post_filter_baseline_fit_post_event_start_seconds=params.windows.post_event_start_seconds,
     )
     candidates: list[CorrectionCandidate] = []
     seen: set[tuple] = set()
@@ -535,12 +615,16 @@ def build_correction_candidates(
     def add_candidate(name: str, description: str, cfg: CorrectionConfig) -> None:
         key = (
             cfg.baseline_order,
+            cfg.baseline_fit_method,
+            cfg.baseline_fit_post_event_start_seconds,
             cfg.highpass_hz,
             cfg.lowpass_hz,
             cfg.filter_type,
             cfg.constrain_final_displacement,
             cfg.baseline_coefficients,
             cfg.post_filter_baseline_order,
+            cfg.post_filter_baseline_fit_method,
+            cfg.post_filter_baseline_fit_post_event_start_seconds,
             cfg.post_filter_baseline_coefficients,
             cfg.post_filter_constrain_final_velocity,
             cfg.post_filter_constrain_final_displacement,
@@ -717,6 +801,48 @@ def _filter_penalty(config: CorrectionConfig, t_max: float) -> float:
     return penalty
 
 
+def _score_component(
+    key: str,
+    label: str,
+    raw_value: float,
+    *,
+    threshold: float,
+    weight: float,
+    cap: float,
+    description: str,
+) -> ScoreComponent:
+    if threshold <= 0.0:
+        normalized = 0.0
+    else:
+        normalized = min(max(float(raw_value), 0.0) / float(threshold), float(cap))
+    return ScoreComponent(
+        key=key,
+        label=label,
+        raw_value=float(raw_value),
+        threshold=float(threshold),
+        normalized_value=float(normalized),
+        weight=float(weight),
+        contribution=float(weight * normalized),
+        description=description,
+    )
+
+
+def _penalty_component(
+    key: str, label: str, value: float, *, description: str
+) -> ScoreComponent:
+    value = float(max(value, 0.0))
+    return ScoreComponent(
+        key=key,
+        label=label,
+        raw_value=value,
+        threshold=None,
+        normalized_value=value,
+        weight=1.0,
+        contribution=value,
+        description=description,
+    )
+
+
 def _score_candidate(
     record: MotionRecord,
     candidate: CorrectionCandidate,
@@ -752,33 +878,111 @@ def _score_candidate(
     displacement_time_scale = max(
         0.75, min(2.50, 0.04 * max(windows.d5_95_seconds, record.dt))
     )
-    terminal_velocity_score = min(final_velocity_ratio / 0.05, 10.0)
-    terminal_displacement_score = min(final_displacement_ratio / 0.80, 5.0)
-    terminal_displacement_pgv_score = min(
-        final_displacement_pgv_seconds / displacement_time_scale, 10.0
+    score_components = (
+        _score_component(
+            "terminal_velocity",
+            "velocidad final",
+            final_velocity_ratio,
+            threshold=0.05,
+            weight=0.18,
+            cap=10.0,
+            description="|v(T)| normalizado por PGV; controla deriva terminal.",
+        ),
+        _score_component(
+            "terminal_displacement",
+            "desplazamiento final",
+            final_displacement_ratio,
+            threshold=0.80,
+            weight=0.04,
+            cap=5.0,
+            description="|u(T)| normalizado por PGD; detecta offset residual.",
+        ),
+        _score_component(
+            "terminal_displacement_pgv",
+            "desplazamiento final/PGV",
+            final_displacement_pgv_seconds,
+            threshold=displacement_time_scale,
+            weight=0.20,
+            cap=10.0,
+            description="|u(T)|/PGV en segundos; penaliza desplazamiento largo no fisico.",
+        ),
+        _score_component(
+            "pgd_pgv",
+            "PGD/PGV",
+            pgd_pgv_seconds,
+            threshold=displacement_time_scale,
+            weight=0.24,
+            cap=10.0,
+            description="Escala temporal PGD/PGV; identifica desplazamientos integrados excesivos.",
+        ),
+        _score_component(
+            "post_event_velocity_drift",
+            "tendencia post-evento de velocidad",
+            post_event_ratio,
+            threshold=0.08,
+            weight=0.10,
+            cap=10.0,
+            description="Pendiente post-evento normalizada por PGV.",
+        ),
+        _score_component(
+            "post_event_displacement_range",
+            "rango post-evento de desplazamiento",
+            post_event_displacement_ratio,
+            threshold=0.20,
+            weight=0.12,
+            cap=10.0,
+            description="Rango post-evento normalizado por PGD.",
+        ),
+        _score_component(
+            "spectral_change",
+            "cambio espectral",
+            spectral_change,
+            threshold=log(1.35),
+            weight=0.06,
+            cap=8.0,
+            description="RMS logaritmico entre espectro corregido y crudo.",
+        ),
+        _score_component(
+            "arias_change",
+            "cambio Arias",
+            arias_change,
+            threshold=log(1.50),
+            weight=0.03,
+            cap=5.0,
+            description="Cambio logaritmico de intensidad de Arias.",
+        ),
+        _score_component(
+            "pga_change",
+            "cambio PGA",
+            pga_change,
+            threshold=log(1.25),
+            weight=0.02,
+            cap=5.0,
+            description="Cambio logaritmico de PGA.",
+        ),
+        _score_component(
+            "cav_change",
+            "cambio CAV",
+            cav_change,
+            threshold=log(1.50),
+            weight=0.01,
+            cap=5.0,
+            description="Cambio logaritmico de CAV.",
+        ),
+        _penalty_component(
+            "complexity_penalty",
+            "penalizacion por complejidad",
+            complexity,
+            description="Penaliza polinomios, restricciones y etapas extra.",
+        ),
+        _penalty_component(
+            "filter_penalty",
+            "penalizacion por filtro",
+            filter_penalty,
+            description="Penaliza cortes high-pass agresivos, fase causal o familias con ripple.",
+        ),
     )
-    pgd_pgv_score = min(pgd_pgv_seconds / displacement_time_scale, 10.0)
-    post_event_score = min(post_event_ratio / 0.08, 10.0)
-    post_event_displacement_score = min(post_event_displacement_ratio / 0.20, 10.0)
-    spectral_score = min(spectral_change / log(1.35), 8.0)
-    pga_score = min(pga_change / log(1.25), 5.0)
-    arias_score = min(arias_change / log(1.50), 5.0)
-    cav_score = min(cav_change / log(1.50), 5.0)
-
-    score = (
-        0.18 * terminal_velocity_score
-        + 0.04 * terminal_displacement_score
-        + 0.20 * terminal_displacement_pgv_score
-        + 0.24 * pgd_pgv_score
-        + 0.10 * post_event_score
-        + 0.12 * post_event_displacement_score
-        + 0.06 * spectral_score
-        + 0.03 * arias_score
-        + 0.02 * pga_score
-        + 0.01 * cav_score
-        + complexity
-        + filter_penalty
-    )
+    score = sum(component.contribution for component in score_components)
 
     notes: list[str] = []
     if final_velocity_ratio <= 0.05:
@@ -809,6 +1013,9 @@ def _score_candidate(
 
     result.diagnostics["recommendation_method"] = candidate.name
     result.diagnostics["recommendation_score"] = float(score)
+    result.diagnostics["recommendation_score_components"] = [
+        component.to_row() for component in score_components
+    ]
 
     return CorrectionCandidateEvaluation(
         name=candidate.name,
@@ -828,6 +1035,7 @@ def _score_candidate(
         cav_log_change=float(cav_change),
         complexity_penalty=float(complexity),
         filter_penalty=float(filter_penalty),
+        score_components=score_components,
         notes=tuple(notes),
     )
 
@@ -903,10 +1111,15 @@ def recommend_correction_method(
         coefficient_notes.append(
             f"Coeficientes recomendados de baseline post-filtro [m/s^2, tau 0-1]: {best_post_coeffs}."
         )
+    dominant_text = ", ".join(
+        f"{component.label}={component.contribution:.3g}"
+        for component in best.dominant_components()
+    )
     decision_notes = (
         f"Metodo recomendado: {best.name}.",
         f"Familias de filtro consideradas: {', '.join(parameter_suggestion.filter_types)}.",
-        "Los parametros se estimaron con ventanas Arias, SNR Fourier, drift terminal y sensibilidad de baseline/filtro.",
+        "Los parametros se estimaron con ventanas Arias, ajuste de baseline ponderado por ventanas quietas, SNR Fourier, drift terminal y sensibilidad de baseline/filtro.",
+        f"Principales contribuciones al score ganador: {dominant_text or 'sin penalizaciones dominantes'}.",
         *coefficient_notes,
         "La seleccion penaliza desplazamiento/velocidad de largo periodo no fisicos, deriva y tendencia post-evento sin distorsionar excesivamente PGA, Arias, CAV ni espectro.",
         "Si el registro puede contener desplazamiento permanente fisico, revise manualmente candidatos con desplazamiento final impuesto.",

@@ -169,3 +169,38 @@ def test_explicit_post_filter_coefficients_override_estimated_post_baseline():
         result.diagnostics["post_filter_baseline_coefficients"], [-0.01, 0.004]
     )
     np.testing.assert_allclose(result.record.acceleration_si(), physical, atol=1.0e-12)
+
+
+def test_quiet_window_baseline_fit_estimates_coefficients_from_pre_and_post_event():
+    dt = 0.01
+    time = np.arange(0.0, 10.0, dt)
+    tau = np.linspace(0.0, 1.0, time.size)
+    true_baseline = 0.02 - 0.01 * tau
+    pulse = np.zeros_like(time)
+    mask = (time >= 3.0) & (time <= 6.0)
+    pulse[mask] = 0.30 * np.sin(2.0 * np.pi * 1.5 * (time[mask] - 3.0))
+    rec = MotionRecord(time=time, acceleration=pulse + true_baseline, units="m/s^2")
+
+    result = correct_record(
+        rec,
+        CorrectionConfig(
+            remove_mean=False,
+            pre_event_seconds=2.0,
+            baseline_order=1,
+            baseline_fit_method="quiet_windows",
+            baseline_fit_post_event_start_seconds=8.0,
+            constrain_final_velocity=False,
+            constrain_final_displacement=False,
+            despike=False,
+            taper_fraction=0.0,
+            highpass_hz=None,
+            lowpass_hz=None,
+        ),
+    )
+
+    assert result.diagnostics["pre_filter_baseline_fit_method"] == "quiet_windows"
+    np.testing.assert_allclose(
+        result.diagnostics["pre_filter_baseline_coefficients"],
+        [0.02, -0.01],
+        atol=1.0e-3,
+    )

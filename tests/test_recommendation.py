@@ -183,3 +183,40 @@ def test_recommended_coefficients_can_reproduce_best_candidate_explicitly():
     )
     np.testing.assert_allclose(explicit_result.velocity, best.result.velocity)
     np.testing.assert_allclose(explicit_result.displacement, best.result.displacement)
+
+
+def test_recommendation_uses_quiet_window_baseline_fit_metadata():
+    dt = 0.01
+    time = np.arange(0.0, 20.0, dt)
+    pulse = 0.25 * np.sin(2.0 * np.pi * 1.0 * time) * np.exp(-0.06 * time)
+    drift = 0.008 + 0.00015 * time
+    rec = MotionRecord(time=time, acceleration=pulse + drift, units="m/s^2")
+
+    recommendation = recommend_correction_method(
+        rec, t_min=0.05, t_max=1.5, filter_types="butterworth"
+    )
+    row = recommendation.to_rows()[0]
+
+    assert row["baseline_fit_method"] == "quiet_windows"
+    assert "baseline_weighting_effective_method" in row
+    assert "ajuste de baseline ponderado" in "\n".join(recommendation.decision_notes)
+
+
+def test_recommendation_exposes_interpretable_score_trace():
+    dt = 0.01
+    time = np.arange(0.0, 12.0, dt)
+    pulse = 0.20 * np.sin(2.0 * np.pi * 1.1 * time) * np.exp(-0.05 * time)
+    drift = 0.01 + 0.0001 * time
+    rec = MotionRecord(time=time, acceleration=pulse + drift, units="m/s^2")
+
+    recommendation = recommend_correction_method(
+        rec, t_min=0.05, t_max=1.5, filter_types="butterworth"
+    )
+    trace = recommendation.to_trace_rows(top=1)
+    row = recommendation.to_rows()[0]
+
+    assert trace
+    assert {"method", "component_key", "contribution"} <= set(trace[0])
+    assert row["score_top_drivers"]
+    assert recommendation.best.dominant_components()
+    assert "recommendation_score_components" in recommendation.best.result.diagnostics
