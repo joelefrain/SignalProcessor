@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from signalprocessor.core import trapezoid_integrate
 from signalprocessor.records import MotionRecord
@@ -21,3 +22,11 @@ def test_response_spectrum_scales_linearly():
     spec1 = response_spectrum(rec, [1.0])
     spec2 = response_spectrum(rec.with_acceleration(2.0 * acc, units="g"), [1.0])
     assert np.isclose(spec2.sa[0] / spec1.sa[0], 2.0, rtol=1e-4)
+
+
+def test_motion_record_rejects_nonuniform_sampling():
+    time = np.asarray([0.0, 0.01, 0.021, 0.03])
+    acc = np.zeros_like(time)
+
+    with pytest.raises(ValueError, match="uniformly sampled"):
+        MotionRecord(time=time, acceleration=acc, units="m/s^2")

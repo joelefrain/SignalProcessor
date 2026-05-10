@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import numpy as np
-
-from .constants import G0
 from .core import newmark_response_spectrum
 from .records import MotionRecord, Spectrum
-from .units import acceleration_from_si
+from .units import acceleration_from_si, acceleration_to_si
 
 
 def default_periods(
@@ -25,6 +23,12 @@ def response_spectrum(
     per = (
         default_periods() if periods is None else np.asarray(periods, dtype=np.float64)
     )
+    if per.ndim != 1 or per.size == 0:
+        raise ValueError("periods must be a non-empty one-dimensional array")
+    if not np.all(np.isfinite(per)) or np.any(per <= 0.0):
+        raise ValueError("all response-spectrum periods must be finite and positive")
+    if np.any(np.diff(per) <= 0.0):
+        raise ValueError("response-spectrum periods must be strictly increasing")
     acc = record.acceleration_si()
     sd, psv, psa_si, saa_si, peak_index = newmark_response_spectrum(
         acc, record.dt, per, damping
@@ -55,6 +59,8 @@ def fourier_amplitude_spectrum(record: MotionRecord) -> tuple[np.ndarray, np.nda
 
 def pseudo_velocity_from_sa(periods, sa, *, units: str = "g") -> np.ndarray:
     periods = np.asarray(periods, dtype=np.float64)
-    sa_si = np.asarray(sa, dtype=np.float64) * (G0 if units == "g" else 1.0)
+    if np.any(periods <= 0.0):
+        raise ValueError("periods must be positive")
+    sa_si = acceleration_to_si(sa, units)
     omega = 2.0 * np.pi / periods
     return sa_si / omega

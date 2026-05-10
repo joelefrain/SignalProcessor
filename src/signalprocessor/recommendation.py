@@ -389,10 +389,21 @@ def _windowed_fas(
         return np.zeros(0), np.zeros(0)
     x = segment.astype(np.float64, copy=True)
     x -= float(np.mean(x))
-    x *= np.hanning(x.size)
+    window = np.hanning(x.size)
+    x *= window
     freqs = np.fft.rfftfreq(nfft, d=dt)
-    amp = np.abs(np.fft.rfft(x, n=nfft)) * dt
+    duration = max(float(segment.size) * float(dt), float(dt))
+    window_rms = max(float(np.sqrt(np.mean(window * window))), np.finfo(float).eps)
+    amp = np.abs(np.fft.rfft(x, n=nfft)) * dt / (np.sqrt(duration) * window_rms)
     return freqs, amp
+
+
+def _default_lowpass(nyquist: float) -> float:
+    return min(25.0, 0.75 * float(nyquist))
+
+
+def _highpass_upper_bound(nyquist: float) -> float:
+    return max(0.02, min(0.50, 0.40 * float(nyquist)))
 
 
 def _estimate_snr_filter_corners(
@@ -404,13 +415,15 @@ def _estimate_snr_filter_corners(
     acc = record.acceleration_si()
     dt = record.dt
     nyquist = 0.5 / dt
+    default_lp = _default_lowpass(nyquist)
+    hp_upper = _highpass_upper_bound(nyquist)
     notes: list[str] = []
 
     if windows.pre_event_seconds is None:
         notes.append(
             "Sin ventana pre-evento suficiente; cortes por reglas conservadoras."
         )
-        return 0.05, min(25.0, 0.80 * nyquist), False, tuple(notes)
+        return min(0.05, hp_upper), default_lp, False, tuple(notes)
 
     pre_n = int(max(8, round(windows.pre_event_seconds / dt)))
     pre_n = min(pre_n, acc.size // 3)
@@ -420,14 +433,14 @@ def _estimate_snr_filter_corners(
         end = min(acc.size, start + pre_n)
     if pre_n < 16 or end - start < 16:
         notes.append("Ventanas SNR demasiado cortas; cortes por reglas conservadoras.")
-        return 0.05, min(25.0, 0.80 * nyquist), False, tuple(notes)
+        return min(0.05, hp_upper), default_lp, False, tuple(notes)
 
     nfft = 1 << int(np.ceil(np.log2(max(pre_n, end - start))))
     freqs, noise = _windowed_fas(acc[:pre_n], dt, nfft)
     _, signal = _windowed_fas(acc[start:end], dt, nfft)
     if freqs.size == 0:
         notes.append("No se pudo calcular FAS/SNR; cortes por reglas conservadoras.")
-        return 0.05, min(25.0, 0.80 * nyquist), False, tuple(notes)
+        return min(0.05, hp_upper), default_lp, False, tuple(notes)
 
     ratio = signal / np.maximum(
         noise, np.percentile(noise[noise > 0.0], 10) if np.any(noise > 0.0) else 1.0e-16
@@ -439,7 +452,7 @@ def _estimate_snr_filter_corners(
     idx = np.flatnonzero(valid)
     if idx.size == 0:
         notes.append("Rango de frecuencia valido insuficiente para SNR.")
-        return 0.05, min(25.0, 0.80 * nyquist), False, tuple(notes)
+        return min(0.05, hp_upper), default_lp, False, tuple(notes)
 
     good = ratio >= snr_threshold
     hp = None
@@ -449,28 +462,28 @@ def _estimate_snr_filter_corners(
             hp = float(freqs[pos])
             break
     if hp is None:
-        hp = 0.05
+        hp = min(0.05, hp_upper)
         notes.append(
             "SNR no cruza umbral a baja frecuencia; se usa high-pass base 0.05 Hz."
         )
     else:
-        hp = float(np.clip(hp, 0.02, 0.20))
+        hp = float(np.clip(hp, 0.02, hp_upper))
         notes.append(f"High-pass estimado por SNR: {hp:.3g} Hz.")
 
     above_hp = idx[freqs[idx] >= hp]
     good_after = above_hp[good[above_hp]]
     if good_after.size:
         lp = float(freqs[good_after[-1]])
-        lp = min(lp, 25.0, 0.80 * nyquist)
+        lp = min(lp, default_lp)
         if lp <= hp * 2.0:
-            lp = min(25.0, 0.80 * nyquist)
+            lp = default_lp
             notes.append(
                 "Low-pass SNR demasiado cercano al high-pass; se usa limite conservador."
             )
         else:
             notes.append(f"Low-pass estimado por SNR: {lp:.3g} Hz.")
     else:
-        lp = min(25.0, 0.80 * nyquist)
+        lp = default_lp
         notes.append("SNR no permite low-pass claro; se usa limite conservador.")
     return hp, lp, True, tuple(notes)
 
@@ -515,6 +528,7 @@ def recommend_correction_parameters(
     hp, lp, snr_available, snr_notes = _estimate_snr_filter_corners(
         record, windows, snr_threshold=snr_threshold
     )
+    hp_upper = _highpass_upper_bound(0.5 / record.dt)
     drift_label, vend_ratio, dend_ratio = _drift_severity(record)
     despike, spike_count = _estimate_spike_need(record)
 
@@ -529,15 +543,23 @@ def recommend_correction_parameters(
     if hp is not None:
         multipliers = (0.6, 1.0, 1.6)
         hp_candidates.extend(
-            float(np.clip(hp * factor, 0.02, 0.20)) for factor in multipliers
+            float(np.clip(hp * factor, 0.02, hp_upper)) for factor in multipliers
         )
     if drift_label in {"media", "alta"} or vend_ratio > 0.05 or dend_ratio > 0.25:
-        hp_candidates.extend((0.05, 0.08, 0.10))
+        hp_candidates.extend(
+            value for value in (0.05, 0.08, 0.10, 0.15, 0.20) if value <= hp_upper
+        )
     hp_candidates = list(
         dict.fromkeys(
             None if value is None else round(float(value), 4) for value in hp_candidates
         )
     )
+    if lp is not None:
+        hp_candidates = [
+            value
+            for value in hp_candidates
+            if value is None or float(value) < 0.90 * float(lp)
+        ]
 
     taper_fraction = float(
         np.clip(max(0.01, 1.0 / max(record.duration, 1.0)), 0.01, 0.05)

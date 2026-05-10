@@ -159,10 +159,15 @@ def cmd_spectrum(args) -> None:
 def cmd_scale(args) -> None:
     rec = read_motion(args.input, units=args.units)
     target = read_target_spectrum(args.target, units=args.target_units)
-    result = linear_scale(rec, target, t_min=args.t_min, t_max=args.t_max)
+    result = linear_scale(
+        rec, target, t_min=args.t_min, t_max=args.t_max, method=args.scale_method
+    )
     write_motion_csv(result.record, args.output, units=args.output_units)
     print(f"wrote {args.output}")
-    print(f"factor={result.factor:.6g} rms_log_error={result.rms_log_error:.4g}")
+    print(
+        f"factor={result.factor:.6g} method={args.scale_method} "
+        f"rms_log_error={result.rms_log_error:.4g}"
+    )
 
 
 def cmd_match(args) -> None:
@@ -298,6 +303,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--output-units", default="g")
     p.add_argument("--t-min", type=float, default=0.2)
     p.add_argument("--t-max", type=float, default=2.0)
+    p.add_argument(
+        "--scale-method",
+        default="log",
+        choices=["log", "linear"],
+        help="Scale-factor objective: logarithmic relative error or linear least squares.",
+    )
     p.set_defaults(func=cmd_scale)
 
     p = sub.add_parser("match")

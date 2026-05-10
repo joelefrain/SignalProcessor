@@ -87,6 +87,8 @@ def _as_1d_float(values: np.ndarray, name: str) -> np.ndarray:
         raise ValueError(f"{name} must be a one-dimensional array")
     if arr.size < 2:
         raise ValueError(f"{name} needs at least two samples")
+    if not np.all(np.isfinite(arr)):
+        raise ValueError(f"{name} values must be finite")
     return arr
 
 
@@ -118,9 +120,13 @@ def compute_ground_motion_parameters_from_series(
     t = _as_1d_float(time, "time")
     acc = _as_1d_float(acceleration_si, "acceleration_si")
     _check_same_length(acc, t, "time")
-    dt = float(np.median(np.diff(t)))
-    if dt <= 0.0:
+    diffs = np.diff(t)
+    if np.any(diffs <= 0.0):
         raise ValueError("time must be strictly increasing")
+    dt = float(np.median(diffs))
+    atol = max(1.0e-12, abs(dt) * 1.0e-8)
+    if not np.allclose(diffs, dt, rtol=1.0e-5, atol=atol):
+        raise ValueError("time must be uniformly sampled")
 
     integrated_velocity, integrated_displacement = integrate_motion(acc, dt)
 

@@ -8,6 +8,7 @@ from signalprocessor.metrics import (
     ground_motion_parameters_to_dict,
 )
 from signalprocessor.records import MotionRecord
+from signalprocessor.spectra import pseudo_velocity_from_sa
 
 
 def test_ground_motion_parameters_are_peak_absolute_values_in_si():
@@ -62,3 +63,11 @@ def test_ground_motion_parameters_display_unit_conversion():
     assert np.isclose(row["pga"], 200.0)
     assert np.isclose(row["pgv"], 200.0)
     assert np.isclose(row["pgd"], 100.0)
+
+
+def test_pseudo_velocity_from_sa_respects_acceleration_units():
+    periods = np.asarray([1.0])
+    psv_from_si = pseudo_velocity_from_sa(periods, np.asarray([1.0]), units="m/s^2")
+    psv_from_cgs = pseudo_velocity_from_sa(periods, np.asarray([100.0]), units="cm/s^2")
+
+    np.testing.assert_allclose(psv_from_cgs, psv_from_si)

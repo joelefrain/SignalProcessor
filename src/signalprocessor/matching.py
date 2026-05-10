@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from .constants import G0
+from .metrics import integrate_motion
 from .processing import CorrectionConfig, correct_record
 from .records import MotionRecord, Spectrum
 from .scaling import linear_scale, spectral_misfit
@@ -45,11 +46,40 @@ def gaussian_cosine_wavelet(
     x = time - center
     env = np.exp(-0.5 * (x / width) ** 2)
     wave = env * np.cos(2.0 * np.pi * x / period)
-    wave -= np.mean(wave)
+    wave = _remove_terminal_drift_from_wavelet(np.asarray(time, dtype=np.float64), wave)
     peak = np.max(np.abs(wave))
     if peak > 0.0:
         wave = wave / peak
     return wave
+
+
+def _remove_terminal_drift_from_wavelet(
+    time: np.ndarray, wavelet: np.ndarray
+) -> np.ndarray:
+    """Project out the acceleration terms that cause residual velocity/displacement."""
+
+    wave = np.asarray(wavelet, dtype=np.float64).copy()
+    if wave.size < 3:
+        return wave - float(np.mean(wave))
+    diffs = np.diff(time)
+    if diffs.size == 0 or np.any(diffs <= 0.0):
+        return wave - float(np.mean(wave))
+    dt = float(np.median(diffs))
+    atol = max(1.0e-12, abs(dt) * 1.0e-8)
+    if not np.allclose(diffs, dt, rtol=1.0e-5, atol=atol):
+        return wave - float(np.mean(wave))
+
+    tau = np.linspace(0.0, 1.0, wave.size, dtype=np.float64)
+    design = np.column_stack([np.ones(wave.size, dtype=np.float64), tau])
+    velocity, displacement = integrate_motion(wave, dt)
+    targets = np.asarray([velocity[-1], displacement[-1]], dtype=np.float64)
+    rows = np.empty((2, 2), dtype=np.float64)
+    for col in range(2):
+        basis_velocity, basis_displacement = integrate_motion(design[:, col], dt)
+        rows[0, col] = basis_velocity[-1]
+        rows[1, col] = basis_displacement[-1]
+    coeffs = np.linalg.lstsq(rows, targets, rcond=None)[0]
+    return wave - design @ coeffs
 
 
 def _relative_displacement_histories(
@@ -281,6 +311,8 @@ def match_spectrum(
             / np.maximum(spec.sa, np.finfo(float).tiny)
         )
         mask = _matching_mask(spec.periods, cfg.t_min, cfg.t_max)
+        if not np.any(mask):
+            raise ValueError("No spectral periods inside matching range")
         active_error = log_error[mask]
         metrics = spectral_misfit(spec, target, t_min=cfg.t_min, t_max=cfg.t_max)
         history.append(

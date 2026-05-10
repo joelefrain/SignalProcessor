@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 
 from .records import MotionRecord, Spectrum
 from .spectra import response_spectrum
+
+ScaleMethod = Literal["log", "logarithmic", "linear", "least_squares", "ls"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +56,50 @@ def spectral_misfit(
     }
 
 
+def _period_weights(weights, periods: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    selected_count = int(np.count_nonzero(mask))
+    if weights is None:
+        return np.ones(selected_count, dtype=np.float64)
+
+    arr = np.asarray(weights, dtype=np.float64)
+    if arr.ndim != 1:
+        raise ValueError("weights must be a one-dimensional array")
+    if arr.size == periods.size:
+        selected = arr[mask]
+    elif arr.size == selected_count:
+        selected = arr
+    else:
+        raise ValueError(
+            "weights must have the same length as spectrum periods or the selected scaling range"
+        )
+    if not np.all(np.isfinite(selected)):
+        raise ValueError("weights must be finite")
+    if np.any(selected < 0.0):
+        raise ValueError("weights must be non-negative")
+    if not np.any(selected > 0.0):
+        raise ValueError("at least one selected weight must be positive")
+    return selected
+
+
+def _normalize_scale_method(method: str) -> str:
+    key = method.strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "log": "log",
+        "logarithmic": "log",
+        "logaritmico": "log",
+        "logarítmico": "log",
+        "linear": "linear",
+        "least_squares": "linear",
+        "ls": "linear",
+        "minimos_cuadrados": "linear",
+        "mínimos_cuadrados": "linear",
+    }
+    try:
+        return aliases[key]
+    except KeyError as exc:
+        raise ValueError("method must be 'log' or 'linear'") from exc
+
+
 def linear_scale_factor(
     spectrum: Spectrum,
     target: Spectrum,
@@ -60,6 +107,7 @@ def linear_scale_factor(
     t_min: float | None = None,
     t_max: float | None = None,
     weights=None,
+    method: ScaleMethod = "log",
 ) -> float:
     target_same = target.as_units(spectrum.units)
     target_sa = target_same.interpolate(spectrum.periods)
@@ -67,12 +115,19 @@ def linear_scale_factor(
     mask &= (spectrum.sa > 0.0) & (target_sa > 0.0)
     if not np.any(mask):
         raise ValueError("No positive spectral ordinates inside scaling range")
-    if weights is None:
-        w = np.ones(np.count_nonzero(mask), dtype=np.float64)
-    else:
-        w = np.asarray(weights, dtype=np.float64)[mask]
+    w = _period_weights(weights, spectrum.periods, mask)
+    selected_record = spectrum.sa[mask]
+    selected_target = target_sa[mask]
+    normalized_method = _normalize_scale_method(method)
+    if normalized_method == "linear":
+        numerator = np.sum(w * selected_record * selected_target)
+        denominator = np.sum(w * selected_record * selected_record)
+        if denominator <= 0.0:
+            raise ValueError("Cannot compute a linear scale factor from zero spectra")
+        return float(numerator / denominator)
+
     log_factor = np.sum(
-        w * (np.log(target_sa[mask]) - np.log(spectrum.sa[mask]))
+        w * (np.log(selected_target) - np.log(selected_record))
     ) / np.sum(w)
     return float(np.exp(log_factor))
 
@@ -85,17 +140,24 @@ def linear_scale(
     damping: float | None = None,
     t_min: float | None = None,
     t_max: float | None = None,
+    weights=None,
+    method: ScaleMethod = "log",
 ) -> ScalingResult:
     damping = target.damping if damping is None else damping
     spectrum_periods = target.periods if periods is None else periods
     original = response_spectrum(
         record, spectrum_periods, damping=damping, output_units=target.units
     )
-    factor = linear_scale_factor(original, target, t_min=t_min, t_max=t_max)
+    factor = linear_scale_factor(
+        original, target, t_min=t_min, t_max=t_max, weights=weights, method=method
+    )
     scaled = record.with_acceleration(
         record.acceleration * factor,
         units=record.units,
-        metadata={"scale_factor": factor},
+        metadata={
+            "scale_factor": factor,
+            "scale_method": _normalize_scale_method(method),
+        },
     )
     scaled_spec = response_spectrum(
         scaled, original.periods, damping=damping, output_units=target.units

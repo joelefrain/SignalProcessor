@@ -27,6 +27,17 @@ class MotionRecord:
             raise ValueError("time and acceleration arrays must have the same length")
         if time.size < 2:
             raise ValueError("a record needs at least two samples")
+        if not np.all(np.isfinite(time)):
+            raise ValueError("time values must be finite")
+        if not np.all(np.isfinite(acc)):
+            raise ValueError("acceleration values must be finite")
+        diffs = np.diff(time)
+        if np.any(diffs <= 0.0):
+            raise ValueError("time values must be strictly increasing")
+        dt = float(np.median(diffs))
+        atol = max(1.0e-12, abs(dt) * 1.0e-8)
+        if not np.allclose(diffs, dt, rtol=1.0e-5, atol=atol):
+            raise ValueError("time values must be uniformly sampled")
         object.__setattr__(self, "time", time)
         object.__setattr__(self, "acceleration", acc)
         object.__setattr__(self, "units", normalize_units(self.units))
@@ -106,8 +117,14 @@ class Spectrum:
             raise ValueError("periods and sa must be one-dimensional arrays")
         if periods.size != sa.size:
             raise ValueError("periods and sa arrays must have the same length")
+        if not np.all(np.isfinite(periods)):
+            raise ValueError("spectral periods must be finite")
+        if not np.all(np.isfinite(sa)):
+            raise ValueError("spectral ordinates must be finite")
         if np.any(periods <= 0.0):
             raise ValueError("all spectral periods must be positive")
+        if np.any(np.diff(periods) <= 0.0):
+            raise ValueError("spectral periods must be strictly increasing")
         object.__setattr__(self, "periods", periods)
         object.__setattr__(self, "sa", sa)
         object.__setattr__(self, "units", normalize_units(self.units))
