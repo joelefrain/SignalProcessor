@@ -1,0 +1,45 @@
+[
+  {
+    "name": "Prism_Processing_Engine",
+    "organization": "U.S. Geological Survey",
+    "description": "Performs data processing on earthquake sensor data, transforming raw sensor counts into acceleration, velocity, and displacement information.",
+    "version": "2.1.0",
+    "status": "Production",
+
+    "permissions": {
+      "usageType": "openSource",
+      "licenses": [
+        {
+          "name": "Public Domain, CC0-1.0",
+          "URL": "https://code.usgs.gov/prism/prism_engine/blob/master/LICENSE.md"
+        }
+      ]
+    },
+
+    "homepageURL": "https://code.usgs.gov/prism/prism_engine",
+    "downloadURL": "https://code.usgs.gov/prism/prism_engine/-/archive/master/prism_engine-master.zip",
+    "disclaimerURL": "https://code.usgs.gov/prism/prism_engine/blob/master/DISCLAIMER.md",
+    "repositoryURL": "https://code.usgs.gov/prism/prism_engine.git",
+    "vcs": "git",
+
+    "laborHours": 0,
+
+    "tags": [
+      "earthquake",
+      "strong motion"
+    ],
+
+    "languages": [
+      "Java"
+    ],
+
+    "contact": {
+      "name": "Jeanne Jones",
+      "email": "jmjones@usgs.gov"
+    },
+
+    "date": {
+      "metadataLastUpdated": "2020-08-03"
+    }
+  }
+]
